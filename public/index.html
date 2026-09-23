@@ -32,7 +32,7 @@
   @keyframes pulse { to { opacity: .35; } }
   #status { color: var(--muted); font-size: 12px; }
 
-  main { flex: 1; overflow-y: auto; padding: 20px 16px 8px; scroll-behavior: smooth; }
+  main { flex: 1; overflow-y: auto; padding: 20px 16px 8px; }
   .wrap { max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
 
   .msg { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; }
@@ -990,22 +990,36 @@
     if (active) active.scrollIntoView({ block: 'nearest' });
   }
 
-  /** Scroll to the newest body-text reply, then focus the composer. */
+  /** Position the viewport without any scroll animation (used when opening a session). */
+  function jumpTo(node, block) {
+    const prev = main.style.scrollBehavior;
+    main.style.scrollBehavior = 'auto';
+    try {
+      if (node) node.scrollIntoView({ block: block || 'start', behavior: 'instant' });
+      else main.scrollTop = main.scrollHeight;
+    } finally {
+      main.style.scrollBehavior = prev;
+    }
+  }
+
+  /** Jump straight to the newest body-text message, then focus the composer. */
   function revealLatestAndFocus() {
-    requestAnimationFrame(() => {
-      const total = assistantNodes.length;
-      if (total) {
-        stickToBottom = false;   // stay on the reply we jumped to
-        const node = assistantNodes[total - 1];
-        node.scrollIntoView({ block: 'start' });
-        activeNode = node;
-        refreshNav();
-      } else {
-        stickToBottom = true;
-        main.scrollTop = main.scrollHeight;
-      }
-      input.focus();
-    });
+    // Synchronous so the session never paints a scroll animation: the first
+    // frame the user sees is already positioned on the newest message.
+    const total = assistantNodes.length;
+    if (total) {
+      stickToBottom = false;   // stay on the message we jumped to
+      const node = assistantNodes[total - 1];
+      jumpTo(node, 'start');   // newest message in view, no animation
+                               // (clamps to the bottom when the reply is short)
+      activeNode = node;
+      refreshNav();
+    } else {
+      stickToBottom = true;
+      jumpTo(null);
+    }
+    scheduleMarkActive();
+    input.focus();
   }
 
   async function switchSession(p) {
