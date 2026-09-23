@@ -389,26 +389,67 @@ const INDEX = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf
 
 // Locate the marked + highlight.js bundles that pi ships for its HTML export,
 // so the browser gets the exact same Markdown pipeline as `pi --export`.
+// A local copy under public/vendor takes priority so the webui works even when
+// the pi install layout can't be auto-detected.
+function isVendorDir(dir) {
+  return !!dir && fs.existsSync(path.join(dir, 'marked.min.js')) && fs.existsSync(path.join(dir, 'highlight.min.js'));
+}
+
 function findVendorDir() {
+  const localVendor = path.join(__dirname, 'public', 'vendor');
+  if (isVendorDir(localVendor)) return localVendor;
+
   const candidates = [];
+  if (process.env.PI_WEBUI_VENDOR) candidates.push(process.env.PI_WEBUI_VENDOR);
   if (process.env.PI_WEBUI_PI) candidates.push(process.env.PI_WEBUI_PI);
   try {
     const which = ON_WINDOWS ? 'where pi' : 'command -v pi';
     execSync(which, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] })
       .split(/\r?\n/).filter(Boolean).forEach((line) => candidates.push(line));
   } catch { /* ignore */ }
+
+  const probeDirs = [];
   for (const c of candidates) {
     try {
       const real = fs.realpathSync(c);
-      // `pi` lives next to the package: <pkg>/bin/pi -> ../dist/core/export-html/vendor
-      const vendor = path.join(path.dirname(real), '..', 'dist', 'core', 'export-html', 'vendor');
-      if (fs.existsSync(path.join(vendor, 'marked.min.js'))) return vendor;
-      // Windows npm global install: shim sits in <npm>/, package under node_modules
-      const npmVendor = path.join(path.dirname(real), 'node_modules', '@earendil-works',
-        'pi-coding-agent', 'dist', 'core', 'export-html', 'vendor');
-      if (fs.existsSync(path.join(npmVendor, 'marked.min.js'))) return npmVendor;
+      const dir = path.dirname(real);
+      probeDirs.push(
+        // `pi` lives next to the package: <pkg>/bin/pi -> ../dist/core/export-html/vendor
+        path.join(dir, '..', 'dist', 'core', 'export-html', 'vendor'),
+        // resolved npm bin shim -> <pkg>/dist/bundle/cli.js
+        path.join(dir, '..', 'core', 'export-html', 'vendor'),
+        // <pkg>/dist/bundle/cli.js when invoked via the package root
+        path.join(dir, 'core', 'export-html', 'vendor'),
+        // Windows npm global install: shim sits in <npm>/, package under node_modules
+        path.join(dir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'core', 'export-html', 'vendor'),
+      );
+      // Managed install: <agent>/bin/pi -> <agent>/install/releases/<version>/...
+      const agentDir = path.dirname(dir);
+      const versionFile = path.join(agentDir, 'install', 'current-version');
+      if (fs.existsSync(versionFile)) {
+        const version = fs.readFileSync(versionFile, 'utf8').trim();
+        if (/^[0-9A-Za-z._+-]+$/.test(version)) {
+          probeDirs.push(path.join(agentDir, 'install', 'releases', version,
+            'node_modules', '@earendil-works', 'pi-coding-agent',
+            'dist', 'core', 'export-html', 'vendor'));
+        }
+      }
     } catch { /* ignore */ }
   }
+  for (const d of probeDirs) {
+    if (isVendorDir(d)) return d;
+  }
+
+  // Last resort: scan known managed-install release directories.
+  const releasesRoot = path.join(os.homedir(), '.pi', 'agent', 'install', 'releases');
+  try {
+    for (const rel of fs.readdirSync(releasesRoot)) {
+      const d = path.join(releasesRoot, rel, 'node_modules', '@earendil-works',
+        'pi-coding-agent', 'dist', 'core', 'export-html', 'vendor');
+      if (isVendorDir(d)) return d;
+    }
+  } catch { /* ignore */ }
+
   return null;
 }
 const VENDOR_DIR = findVendorDir();

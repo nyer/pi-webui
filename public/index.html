@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>pi · web</title>
 <style>
   :root {
@@ -17,6 +17,7 @@
     background: var(--bg); color: var(--fg);
     font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     display: flex; flex-direction: column;
+    -webkit-text-size-adjust: 100%;
   }
   header {
     display: flex; align-items: center; gap: 12px;
@@ -254,6 +255,64 @@
   .modal .opts button:hover { border-color: var(--accent); }
   .modal textarea { width: 100%; }
   .modal .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+  /* ---- mobile drawer backdrop (only active on narrow screens) ---- */
+  #sbBackdrop { display: none; }
+
+  /* ---------- responsive: tablets & phones ---------- */
+  @media (max-width: 860px) {
+    html, body { height: 100dvh; }
+    header { padding: 8px 12px; padding-top: calc(8px + env(safe-area-inset-top)); gap: 8px; }
+    header .title { font-size: 15px; }
+    header .model { font-size: 11px; max-width: 45vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Sidebar becomes an off-canvas drawer over the chat column */
+    #sidebar {
+      position: fixed; top: 0; left: 0; bottom: 0; z-index: 45;
+      width: min(300px, 84vw);
+      transform: translateX(0);
+      transition: transform .2s ease;
+      box-shadow: 0 0 40px rgba(0,0,0,.5);
+      padding-top: env(safe-area-inset-top);
+    }
+    #sidebar.collapsed {
+      width: min(300px, 84vw);
+      transform: translateX(-105%);
+      border-right: 1px solid var(--border);
+      overflow: hidden;
+    }
+    body.sb-open #sbBackdrop {
+      display: block; position: fixed; inset: 0; z-index: 44;
+      background: rgba(0,0,0,.5);
+    }
+
+    main { padding: 12px 10px 6px; }
+    .wrap { gap: 10px; }
+    footer { padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); }
+    .hint { font-size: 11px; }
+    .toolbar { flex-wrap: wrap; gap: 6px; }
+    .tb-item { padding: 6px 9px; }
+    .tb-dropdown { min-width: min(260px, 84vw); }
+
+    .composer { gap: 6px; }
+    .composer button { padding: 10px 12px; }
+    /* 16px prevents iOS Safari from zooming when the composer is focused */
+    textarea { font-size: 16px; min-height: 44px; }
+
+    .nav { right: 10px; }
+    .nav-btn { width: 36px; height: 36px; }
+
+    .md pre { font-size: 11.5px; }
+    .md code { font-size: 12px; }
+  }
+
+  @media (max-width: 560px) {
+    #status { display: none; }
+    header .model { max-width: 52vw; }
+    .msg .body { padding: 9px 10px; }
+    .msg .role { padding: 5px 10px; }
+    .nav-panel { width: 92vw; }
+  }
 </style>
 </head>
 <body>
@@ -296,6 +355,8 @@
     </footer>
   </div>
 </div>
+
+<div id="sbBackdrop"></div>
 
 <div class="nav" id="nav">
   <div class="nav-panel hidden" id="navPanel">
@@ -348,6 +409,7 @@
   const sbList = document.getElementById('sbList');
   const sbRefresh = document.getElementById('sbRefresh');
   const sbNew = document.getElementById('sbNew');
+  const sbBackdrop = document.getElementById('sbBackdrop');
 
   let allAssistant = [];     // every merged reply box, in document order
   let assistantNodes = [];   // navigable subset: only replies with visible body text
@@ -386,6 +448,8 @@
       return href;
     };
     try {
+      // Match pi's `--export` renderer: strict strikethrough + HTML-as-plain-text.
+      const strictStrikethroughRegex = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
       marked.use({
         breaks: true,
         gfm: true,
@@ -393,6 +457,16 @@
           // Render raw HTML as literal text so the model can't inject markup.
           html() { return undefined; },
           tag() { return undefined; },
+          del(src) {
+            const match = strictStrikethroughRegex.exec(src);
+            if (!match) return undefined;
+            return {
+              type: 'del',
+              raw: match[0],
+              text: match[2],
+              tokens: this.lexer.inlineTokens(match[2]),
+            };
+          },
         },
         renderer: {
           link(token) {
@@ -1124,6 +1198,7 @@
       if (!r.ok) throw new Error((await r.json()).error || 'switch failed');
       currentSessionPath = p;
       updateSidebarActive();
+      if (window.innerWidth <= 860) toggleSidebar(true);
     } catch (err) {
       focusAfterSnapshot = false;
       addSystem('切换会话失败: ' + err.message);
@@ -1136,6 +1211,7 @@
     try {
       const r = await fetch('/new-session', { method: 'POST' });
       if (!r.ok) throw new Error('new session failed');
+      if (window.innerWidth <= 860) toggleSidebar(true);
     } catch (err) {
       focusAfterSnapshot = false;
       addSystem('新建会话失败: ' + err.message);
@@ -1159,7 +1235,14 @@
 
   function toggleSidebar(collapsed) {
     sidebar.classList.toggle('collapsed', collapsed);
+    updateSbBackdrop();
     try { localStorage.setItem('pi-webui:sidebar', collapsed ? '0' : '1'); } catch { /* ignore */ }
+  }
+
+  // On narrow screens the sidebar is an overlay drawer, so dim the chat behind it.
+  function updateSbBackdrop() {
+    const mobile = window.innerWidth <= 860;
+    document.body.classList.toggle('sb-open', mobile && !sidebar.classList.contains('collapsed'));
   }
 
   /* ---------------- transport ---------------- */
@@ -1207,6 +1290,7 @@
   navPrev.addEventListener('click', () => stepAssistant(-1));
   navNext.addEventListener('click', () => stepAssistant(1));
   sbToggle.addEventListener('click', () => toggleSidebar(!sidebar.classList.contains('collapsed')));
+  sbBackdrop.addEventListener('click', () => toggleSidebar(true));
   sbRefresh.addEventListener('click', () => loadSessions());
   sbNew.addEventListener('click', () => newSession());
   navListBtn.addEventListener('click', () => {
@@ -1218,7 +1302,7 @@
     navPanel.classList.add('hidden');
     navListBtn.classList.remove('on');
   });
-  window.addEventListener('resize', positionNav);
+  window.addEventListener('resize', () => { positionNav(); updateSbBackdrop(); });
   main.addEventListener('scroll', () => {
     // user (or a jump) moved the viewport: follow only while pinned to the bottom
     stickToBottom = atBottom();
@@ -1230,13 +1314,14 @@
     else if (e.key === 'ArrowDown') { e.preventDefault(); stepAssistant(1); }
   });
 
-  // restore sidebar preference (auto-collapse on narrow screens)
+  // restore sidebar preference (always collapse into the drawer on narrow screens)
   try {
     const savedSidebar = localStorage.getItem('pi-webui:sidebar');
-    if (savedSidebar === '0' || (savedSidebar === null && window.innerWidth < 860)) {
+    if (window.innerWidth <= 860 || savedSidebar === '0') {
       sidebar.classList.add('collapsed');
     }
   } catch { /* ignore */ }
+  updateSbBackdrop();
 
   /* ---- model toolbar ---- */
   let cachedModels = null;  // { model, thinkingLevel, models[] }

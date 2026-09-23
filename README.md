@@ -97,9 +97,13 @@ Any extra args are forwarded to `pi`.
   - `＋` starts a **new session**, `⟳` refreshes, `×` (hover) moves a session to the
     Trash; the active session can't be deleted
   - the `☰` button in the header collapses/expands the sidebar (auto-collapsed on
-    narrow screens, remembered in `localStorage`)
-- **Markdown** rendering (pi's bundled `marked` + `highlight.js`), code highlighting,
-  tables, task lists; raw HTML is escaped and link schemes are allow-listed.
+    narrow screens, remembered in `localStorage`); on phones it becomes an
+    off-canvas drawer with a dim backdrop
+- **Markdown** rendering (`marked` + `highlight.js`, matching pi's `--export`
+  pipeline): headings, lists, tables, task lists, strikethrough, code highlighting;
+  raw HTML is escaped and link schemes are allow-listed.
+  The bundles are served from pi's install when detected, with a local copy in
+  `public/vendor/` as a fallback so markdown always works.
 - Each user turn renders as **one merged reply**: thinking steps and tool calls are
   combined into a single collapsed **“思考与工具调用”** block (click to expand);
   body text stays visible.
