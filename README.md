@@ -48,6 +48,26 @@ to attach to an exact session instead (avoid while a TUI is actively writing it)
 a new copy on every restart (which is what created the duplicate fork chains).
 Set `PI_WEBUI_FORK=1` to force a fresh `--fork` of `PI_SESSION_FILE`.
 
+### Windows
+
+On Windows, use the PowerShell port (`start.ps1`; same commands and env vars):
+
+```powershell
+.\start.ps1            # start in the background (default)
+.\start.ps1 status     # pid, url, health
+.\start.ps1 restart    # stop then start
+.\start.ps1 stop       # stop (also cleans up stray server.mjs)
+.\start.ps1 logs       # tail the log
+.\start.ps1 restart --port 8790
+```
+
+It writes the same `.run\pi-webui.*` files. `start` launches the server behind
+a hidden `cmd.exe` wrapper so it survives closing the terminal, waits for
+`/health`, and writes the same pid/port/host files. `stop` kills the whole tree
+(`taskkill /T`, graceful attempt then force) plus any untracked `server.mjs`
+node processes. On Windows `server.mjs` also runs `pi` (an npm `.cmd` shim)
+through `%COMSPEC%`, since node's `spawn` cannot exec `.cmd` shims directly.
+
 ### Options / env
 
 | flag | env | default |

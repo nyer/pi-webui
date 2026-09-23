@@ -179,6 +179,32 @@
   button:disabled { opacity: .45; cursor: default; }
   .hint { max-width: 920px; margin: 6px auto 0; color: var(--muted); font-size: 11.5px; }
 
+  /* ---- model toolbar ---- */
+  .toolbar { max-width: 920px; margin: 0 auto 6px; display: flex; gap: 6px; align-items: center; position: relative; }
+  .tb-item { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; font-size: 11.5px; color: var(--fg); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-family: var(--mono); }
+  .tb-item:hover { border-color: var(--accent); color: var(--accent); }
+  .tb-item .arrow { font-size: 8px; margin-left: 3px; color: var(--muted); }
+  .tb-item:hover .arrow { color: var(--accent); }
+  .tb-dropdown { position: absolute; bottom: 100%; left: 0; margin-bottom: 4px; min-width: 260px; max-height: 320px; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 60; }
+  .tb-dropdown .group-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 5px 8px 3px; }
+  .tb-dropdown .opt { display: block; width: 100%; text-align: left; background: transparent; border: none; border-radius: 6px; padding: 6px 8px; color: var(--fg); font-size: 12px; cursor: pointer; font-family: inherit; }
+  .tb-dropdown .opt:hover { background: var(--panel-2); }
+  .tb-dropdown .opt.active { background: #1f3a5f; color: var(--accent); }
+  .tb-dropdown .opt .opt-meta { font-size: 10px; color: var(--muted); font-family: var(--mono); }
+  .tb-dropdown .opt.active .opt-meta { color: var(--accent); opacity: .7; }
+  .tb-dropdown .opt + .opt { margin-top: 2px; }
+  .tb-dropdown .opt-badge { font-size: 11px; margin-left: 4px; }
+
+  /* ---- image previews ---- */
+  .image-previews { max-width: 920px; margin: 0 auto 6px; display: none; gap: 6px; flex-wrap: wrap; }
+  .image-previews.has { display: flex; }
+  .img-preview { position: relative; width: 72px; height: 72px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; flex: none; }
+  .img-preview img { width: 100%; height: 100%; object-fit: cover; }
+  .img-preview .img-del { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.65); border: none; border-radius: 4px; color: #fff; font-size: 11px; cursor: pointer; line-height: 1; }
+  .img-preview .img-del:hover { background: rgba(200,50,50,.85); }
+  .img-preview .img-size { position: absolute; bottom: 2px; left: 2px; font-size: 9px; color: #fff; background: rgba(0,0,0,.55); padding: 1px 4px; border-radius: 3px; font-family: var(--mono); }
+  .user-imgs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+
   /* ---- layout: left session sidebar + chat column ---- */
   #layout { flex: 1; display: flex; min-height: 0; min-width: 0; }
   #sidebar {
@@ -218,6 +244,9 @@
 
   #backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 50; }
   #backdrop.show { display: flex; }
+  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 100; cursor: zoom-out; }
+  #lightbox.show { display: flex; }
+  #lightbox img { max-width: 94vw; max-height: 94vh; object-fit: contain; border-radius: 4px; box-shadow: 0 4px 40px rgba(0,0,0,.5); }
   .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; width: min(520px, 92vw); }
   .modal h3 { margin: 0 0 10px; font-size: 15px; }
   .modal .opts { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
@@ -251,6 +280,13 @@
     <main id="main"><div class="wrap" id="wrap"></div></main>
 
     <footer>
+      <div class="toolbar" id="toolbar">
+        <button class="tb-item" id="tbImageBtn" title="上传图片 (支持多模态模型)">🖼</button>
+        <button class="tb-item" id="tbModel"><span id="tbModelLabel">model…</span><span class="arrow">▼</span></button>
+        <div class="tb-dropdown" id="tbModelDropdown" style="display:none"></div>
+      </div>
+      <input type="file" id="imageInput" accept="image/*" multiple style="display:none" />
+      <div class="image-previews" id="imagePreviews"></div>
       <div class="composer">
         <textarea id="input" placeholder="Ask pi…  (Enter to send, Shift+Enter for newline)"></textarea>
         <button class="ghost" id="stop" title="Abort current run">Stop</button>
@@ -280,6 +316,7 @@
 </div>
 
 <div id="backdrop"><div class="modal" id="modal"></div></div>
+<div id="lightbox"><img id="lightbox-img" src="" alt="" /></div>
 
 <script src="/vendor/marked.min.js"></script>
 <script src="/vendor/highlight.min.js"></script>
@@ -328,6 +365,11 @@
   const textBlocks = new Map();       // contentIndex -> {el, raw}
   const thinkBlocks = new Map();
   const toolEls = new Map();          // toolCallId -> element
+
+  /* ---- image upload ---- */
+  const imageInput = document.getElementById('imageInput');
+  const imagePreviews = document.getElementById('imagePreviews');
+  let pendingImages = [];  // {data, mimeType, name, size}
 
   const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
@@ -458,16 +500,57 @@
     return currentAssistant;
   }
 
-  function addUser(text) {
+  function addUser(text, images) {
     currentAssistant = null;   // a user input always starts a new reply
     const box = el('div', 'msg user');
     box.appendChild(el('div', 'role', 'you'));
-    box.appendChild(el('div', 'body', esc(text)));
+    const body = el('div', 'body');
+    if (images && images.length) {
+      const imgRow = el('div', 'user-imgs');
+      for (const img of images) {
+        const thumb = el('img');
+        thumb.src = 'data:' + img.mimeType + ';base64,' + img.data;
+        thumb.style.cssText = 'max-width:200px;max-height:120px;border-radius:6px;margin:0 4px 4px 0;vertical-align:top;cursor:zoom-in';
+        thumb.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openLightbox(thumb.src);
+        });
+        imgRow.appendChild(thumb);
+      }
+      body.appendChild(imgRow);
+    }
+    if (text) body.appendChild(document.createTextNode(text));
+    box.appendChild(body);
     wrap.appendChild(box);
     userNodes.push(box);
     if (!navPanel.classList.contains('hidden')) { renderInputList(); updateInputHighlight(); }
     scroll();
   }
+
+  /* ---- lightbox (click to zoom images) ---- */
+  const lightbox = document.getElementById('lightbox');
+  const lightboxImg = document.getElementById('lightbox-img');
+
+  function openLightbox(src) {
+    lightboxImg.src = src;
+    lightbox.classList.add('show');
+  }
+
+  function closeLightbox() {
+    lightbox.classList.remove('show');
+    lightboxImg.src = '';
+  }
+
+  // close on backdrop click (not on the image itself)
+  lightbox.addEventListener('click', closeLightbox);
+  lightboxImg.addEventListener('click', (e) => e.stopPropagation());
+
+  // close on Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && lightbox.classList.contains('show')) {
+      closeLightbox();
+    }
+  });
 
   function addSystem(text) {
     wrap.appendChild(el('div', 'sys', esc(text)));
@@ -768,14 +851,19 @@
         toolResult('bash-' + m.timestamp, 'bash: ' + m.command, m.output, m.exitCode !== 0);
       }
     }
-    if (data.state && data.state.model) modelEl.textContent = data.state.model.id + ' · ' + data.state.model.provider;
+    if (data.state && data.state.model) {
+      modelEl.textContent = data.state.model.id + ' · ' + data.state.model.provider;
+      updateModelLabel(data.state.model.provider, data.state.model.id, data.state.thinkingLevel, data.state.model);
+    }
     if (data.state && data.state.sessionId) {
       hintEl.textContent = 'session ' + data.state.sessionId.slice(0, 8) + ' · live via pi RPC';
       document.title = 'pi · ' + data.state.sessionId.slice(0, 8);
     }
     if (data.state && data.state.sessionFile) {
+      const prev = currentSessionPath;
       currentSessionPath = data.state.sessionFile;
       updateSidebarActive();
+      if (prev !== data.state.sessionFile) loadSessions();
     }
     currentAssistant = null;
     syncNav();
@@ -1036,7 +1124,6 @@
       if (!r.ok) throw new Error((await r.json()).error || 'switch failed');
       currentSessionPath = p;
       updateSidebarActive();
-      setTimeout(loadSessions, 800);
     } catch (err) {
       focusAfterSnapshot = false;
       addSystem('切换会话失败: ' + err.message);
@@ -1049,7 +1136,6 @@
     try {
       const r = await fetch('/new-session', { method: 'POST' });
       if (!r.ok) throw new Error('new session failed');
-      setTimeout(loadSessions, 700);
     } catch (err) {
       focusAfterSnapshot = false;
       addSystem('新建会话失败: ' + err.message);
@@ -1092,14 +1178,19 @@
 
   async function send() {
     const message = input.value.trim();
-    if (!message) return;
+    const hasImages = pendingImages.length > 0;
+    if (!message && !hasImages) return;
+    const images = pendingImages.slice();
     input.value = '';
+    clearPendingImages();
     // Sending a new instruction re-enables follow mode and jumps to the newest output.
     stickToBottom = true;
-    addUser(message);
+    addUser(message, images);
     main.scrollTop = main.scrollHeight;
     positionNav();
-    await fetch('/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, behavior: 'steer' }) });
+    const payload = { message, behavior: 'steer' };
+    if (hasImages) payload.images = images;
+    await fetch('/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   }
 
   sendBtn.addEventListener('click', send);
@@ -1146,6 +1237,193 @@
       sidebar.classList.add('collapsed');
     }
   } catch { /* ignore */ }
+
+  /* ---- model toolbar ---- */
+  let cachedModels = null;  // { model, thinkingLevel, models[] }
+  let currentModelInfo = null; // full model object from snapshot
+  const tbModelBtn = document.getElementById('tbModel');
+  const tbModelLabel = document.getElementById('tbModelLabel');
+  const tbDropdown = document.getElementById('tbModelDropdown');
+  let modelDropdownOpen = false;
+
+  function getModelInputs(model) {
+    if (!model || !model.id) return ['text'];
+    return model.input || ['text'];
+  }
+
+  function updateImageButtonVisibility() {
+    const btn = document.getElementById('tbImageBtn');
+    if (!btn) return;
+    const supportsImage = currentModelInfo && getModelInputs(currentModelInfo).includes('image');
+    btn.style.display = supportsImage ? '' : 'none';
+    if (!supportsImage && pendingImages.length) {
+      clearPendingImages();
+      addSystem('当前模型不支持图片，已清除待发送图片');
+    }
+  }
+
+  function updateModelLabel(provider, modelId, thinkingLevel, modelObj) {
+    const txt = modelId ? (modelId + ' · ' + provider) : 'model…';
+    tbModelLabel.textContent = txt;
+    if (modelObj) currentModelInfo = modelObj;
+    updateImageButtonVisibility();
+  }
+
+  async function fetchAndRenderModels() {
+    try {
+      const r = await fetch('/api/models');
+      if (!r.ok) throw new Error('failed');
+      cachedModels = await r.json();
+    } catch (err) {
+      tbDropdown.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px;text-align:center">加载失败</div>';
+      return;
+    }
+    const { model, models, thinkingLevel } = cachedModels;
+    // group by provider
+    const groups = {};
+    for (const m of models || []) {
+      const p = m.provider || 'other';
+      if (!groups[p]) groups[p] = [];
+      groups[p].push(m);
+    }
+    let html = '';
+    const curProvider = model?.provider;
+    const curModelId = model?.id;
+    for (const [provider, items] of Object.entries(groups)) {
+      html += '<div class="group-label">' + esc(provider) + '</div>';
+      for (const m of items) {
+        const active = m.provider === curProvider && m.id === curModelId;
+        const supportsImage = getModelInputs(m).includes('image');
+        const badge = supportsImage ? ' <span class="opt-badge">🖼</span>' : '';
+        html += '<button class="opt' + (active ? ' active' : '') + '" data-provider="' + esc(m.provider) + '" data-model="' + esc(m.id) + '">' +
+          esc(m.id || m.label || m.name || m.model || '?') + badge +
+          '<div class="opt-meta">' + (active ? (thinkingLevel ? '✓ ' + thinkingLevel : '✓') : (supportsImage ? '图+文' : '仅文本')) + '</div></button>';
+      }
+    }
+    tbDropdown.innerHTML = html || '<div style="padding:12px;color:var(--muted);font-size:12px;text-align:center">无可切换模型</div>';
+
+    // attach click handlers
+    tbDropdown.querySelectorAll('.opt').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const provider = btn.dataset.provider;
+        const modelId = btn.dataset.model;
+        try {
+          const r = await fetch('/api/set-model', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider, modelId }),
+          });
+          if (!r.ok) throw new Error((await r.json()).error || 'request failed');
+          addSystem('切换到 ' + modelId + ' · ' + provider);
+        } catch (err) {
+          addSystem('模型切换失败: ' + err.message);
+        }
+        closeDropdown();
+      });
+    });
+  }
+
+  function closeDropdown() {
+    tbDropdown.style.display = 'none';
+    modelDropdownOpen = false;
+  }
+
+  tbModelBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (modelDropdownOpen) { closeDropdown(); return; }
+    modelDropdownOpen = true;
+    tbDropdown.style.display = 'block';
+    // fetch/render each time the dropdown opens (models may change)
+    fetchAndRenderModels();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (modelDropdownOpen && !tbDropdown.contains(e.target) && e.target !== tbModelBtn) {
+      closeDropdown();
+    }
+  });
+
+  // Close dropdown on Escape key also
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modelDropdownOpen) {
+      e.stopPropagation();
+      closeDropdown();
+    }
+  }, { capture: true });
+
+  /* ---- image upload ---- */
+  const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+  function handleImageFile(file) {
+    if (!file.type.startsWith('image/')) return;
+    if (file.size > MAX_IMAGE_SIZE) {
+      addSystem('图片太大（' + Math.round(file.size / 1024) + 'KB），每个图片不超过 10MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const data = reader.result.split(',')[1]; // strip data:...;base64,
+      pendingImages.push({ data, mimeType: file.type, name: file.name, size: file.size });
+      renderImagePreviews();
+      input.focus();
+    };
+    reader.onerror = () => addSystem('读取图片失败: ' + file.name);
+    reader.readAsDataURL(file);
+  }
+
+  function renderImagePreviews() {
+    if (!pendingImages.length) { imagePreviews.classList.remove('has'); imagePreviews.innerHTML = ''; return; }
+    imagePreviews.classList.add('has');
+    imagePreviews.innerHTML = pendingImages.map((img, i) =>
+      '<div class="img-preview">' +
+        '<img src="data:' + img.mimeType + ';base64,' + img.data + '" alt="' + esc(img.name || 'image') + '" />' +
+        '<button class="img-del" data-idx="' + i + '" title="移除">×</button>' +
+        '<span class="img-size">' + (img.size > 1024 * 1024 ? (img.size / 1024 / 1024).toFixed(1) + 'MB' : Math.round(img.size / 1024) + 'KB') + '</span>' +
+      '</div>'
+    ).join('');
+    imagePreviews.querySelectorAll('.img-del').forEach(btn => {
+      btn.addEventListener('click', () => removePendingImage(Number(btn.dataset.idx)));
+    });
+  }
+
+  function removePendingImage(idx) {
+    pendingImages.splice(idx, 1);
+    if (!pendingImages.length) imagePreviews.classList.remove('has');
+    renderImagePreviews();
+    input.focus();
+  }
+
+  function clearPendingImages() {
+    pendingImages = [];
+    imagePreviews.classList.remove('has');
+    imagePreviews.innerHTML = '';
+  }
+
+  // File input change
+  imageInput.addEventListener('change', () => {
+    for (const file of imageInput.files) handleImageFile(file);
+    imageInput.value = '';
+  });
+
+  // Paste images from clipboard
+  input.addEventListener('paste', (e) => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    const imgItems = [];
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) imgItems.push(file);
+      }
+    }
+    if (imgItems.length) {
+      // Don't prevent default text paste — the image is added in addition
+      for (const f of imgItems) handleImageFile(f);
+    }
+  });
+
+  // Toolbar button triggers file picker
+  document.getElementById('tbImageBtn').addEventListener('click', () => imageInput.click());
 
   setStatus();
   positionNav();

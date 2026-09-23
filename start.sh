@@ -40,6 +40,11 @@ Commands:
 Server options are forwarded to server.mjs, e.g. --port, --host,
 --session, --provider, --model, --thinking.
 
+start.sh options:
+  --public   bind to 0.0.0.0 (accessible from other devices on the network)
+             Shorthand for --host 0.0.0.0 -- but the server has NO built-in
+             auth, so do not expose publicly without adding your own.
+
 Environment:
   PI_WEBUI_PORT          listen port           (default 8787)
   PI_WEBUI_HOST          bind host             (default 127.0.0.1)
@@ -57,6 +62,7 @@ Examples:
   ./start.sh restart
   PI_WEBUI_PORT=9000 ./start.sh restart
   ./start.sh start --session ~/.pi/agent/sessions/xxx.jsonl
+  ./start.sh start --public        # listen on all interfaces (0.0.0.0)
 EOF
 }
 
@@ -74,7 +80,11 @@ is_running() {
 # server.mjs processes not tracked by our pid file (started by hand, etc.)
 stray_pids() { pgrep -f "node .*server\.mjs" 2>/dev/null || true; }
 
-health() { curl -fsS "http://${HOST}:${PORT}/health" 2>/dev/null || true; }
+health() { 
+  local h="${HOST}"
+  [ "$h" = "0.0.0.0" ] && h="127.0.0.1"
+  curl -fsS "http://${h}:${PORT}/health" 2>/dev/null || true; 
+}
 
 # status/logs should reflect the port/host the instance was actually started with
 load_runtime_env() {
@@ -216,6 +226,15 @@ do_logs() {
 
 CMD="${1:-start}"
 if [ $# -gt 0 ]; then shift; fi
+
+# --public: shorthand for binding to 0.0.0.0 (filter before forwarding)
+_filtered=()
+for _a in "$@"; do
+  if [ "$_a" = "--public" ]; then HOST="0.0.0.0"
+  else _filtered+=("$_a")
+  fi
+done
+set -- "${_filtered[@]}"
 
 case "$CMD" in
   start)   do_start "$@" ;;

@@ -58,7 +58,21 @@ piArgs.push(...opts.piArgs);
 
 console.log(`[pi-webui] spawning: ${PI_BIN} ${piArgs.join(' ')}`);
 
-const child = spawn(PI_BIN, piArgs, {
+/* On Windows, npm installs `pi` as pi.cmd / pi (sh shim); node's spawn can't
+ * exec either (no PATHEXT resolution, .cmd needs a shell). Route through
+ * %COMSPEC% instead: windowsVerbatimArguments gives exact control of the
+ * command line, and the extra outer quote pair makes cmd /s strip only the
+ * wrapper quotes, leaving per-arg quoting intact. */
+const ON_WINDOWS = process.platform === 'win32';
+const quoteCmdArg = (s) => (/[\s"]/.test(s) ? `"${s}"` : s);
+function spawnPi(bin, args, opts) {
+  if (!ON_WINDOWS) return spawn(bin, args, opts);
+  const line = [bin, ...args].map(quoteCmdArg).join(' ');
+  return spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${line}"`],
+    { ...opts, windowsVerbatimArguments: true });
+}
+
+const child = spawnPi(PI_BIN, piArgs, {
   stdio: ['pipe', 'pipe', 'pipe'],
   env: { ...process.env, PI_CODING_AGENT: 'true' },
 });
@@ -97,7 +111,26 @@ function sendCommand(cmd) {
   return true;
 }
 
-/** Ask pi for the current state + messages, then broadcast a snapshot to every client. */
+/** Pending command-reply resolvers (for GET /api/models etc.). id -> { resolve, reject, timer } */
+const pendingReplies = new Map();
+
+function sendCommandAndWait(cmd, timeout = 8000) {
+  const id = cmd.id || ('req-' + (++cmdSeq));
+  cmd.id = id;
+  return new Promise((resolve, reject) => {
+    if (!child || !child.stdin || child.stdin.destroyed) return reject(new Error('pi not connected'));
+    const timer = setTimeout(() => {
+      pendingReplies.delete(id);
+      reject(new Error('timeout'));
+    }, timeout);
+    pendingReplies.set(id, { resolve, reject, timer });
+    if (!sendCommand(cmd)) {
+      clearTimeout(timer);
+      pendingReplies.delete(id);
+      reject(new Error('stdin write failed'));
+    }
+  });
+}
 function refreshAllClients() {
   const base = 'refresh-' + (++cmdSeq);
   refreshPending = { stateId: base + '-state', msgsId: base + '-messages', state: null };
@@ -171,6 +204,21 @@ function routePiEvent(ev) {
     } else {
       pendingInit.delete(ev.id);
     }
+    return;
+  }
+
+  // Pending command replies (e.g., API models request).
+  if (ev.type === 'response' && ev.id && pendingReplies.has(ev.id)) {
+    const p = pendingReplies.get(ev.id);
+    clearTimeout(p.timer);
+    pendingReplies.delete(ev.id);
+    p.resolve(ev.data || ev);
+    return;
+  }
+
+  // After a model change, refresh all clients so the UI picks up the new model.
+  if (ev.type === 'response' && ev.id && (ev.command === 'set_model' || ev.command === 'cycle_model') && ev.success !== false) {
+    refreshAllClients();
     return;
   }
 
@@ -345,14 +393,20 @@ function findVendorDir() {
   const candidates = [];
   if (process.env.PI_WEBUI_PI) candidates.push(process.env.PI_WEBUI_PI);
   try {
-    const bin = execSync('command -v pi', { encoding: 'utf8' }).trim();
-    if (bin) candidates.push(bin);
+    const which = ON_WINDOWS ? 'where pi' : 'command -v pi';
+    execSync(which, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] })
+      .split(/\r?\n/).filter(Boolean).forEach((line) => candidates.push(line));
   } catch { /* ignore */ }
   for (const c of candidates) {
     try {
       const real = fs.realpathSync(c);
+      // `pi` lives next to the package: <pkg>/bin/pi -> ../dist/core/export-html/vendor
       const vendor = path.join(path.dirname(real), '..', 'dist', 'core', 'export-html', 'vendor');
       if (fs.existsSync(path.join(vendor, 'marked.min.js'))) return vendor;
+      // Windows npm global install: shim sits in <npm>/, package under node_modules
+      const npmVendor = path.join(path.dirname(real), 'node_modules', '@earendil-works',
+        'pi-coding-agent', 'dist', 'core', 'export-html', 'vendor');
+      if (fs.existsSync(path.join(npmVendor, 'marked.min.js'))) return npmVendor;
     } catch { /* ignore */ }
   }
   return null;
@@ -480,10 +534,19 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/prompt') {
     let body;
     try { body = JSON.parse(await readBody(req) || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
-    const message = (body.message ?? '').toString();
-    if (!message.trim()) return json(res, 400, { error: 'empty message' });
-    const cmd = { type: 'prompt', message };
+    const cmd = { type: 'prompt' };
+    const message = (body.message ?? '').toString().trim();
+    const images = body.images;
+    if (!message && (!images || !images.length)) return json(res, 400, { error: 'empty message' });
+    if (message) cmd.message = message;
     if (isStreaming) cmd.streamingBehavior = body.behavior === 'followUp' ? 'followUp' : 'steer';
+    if (images && Array.isArray(images) && images.length) {
+      cmd.images = images.map((img) => ({
+        type: 'image',
+        data: String(img.data || ''),
+        mimeType: String(img.mimeType || 'image/png'),
+      }));
+    }
     sendCommand(cmd);
     return json(res, 200, { ok: true, streaming: isStreaming });
   }
@@ -500,6 +563,40 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true });
   }
 
+  /* ---- model API ---- */
+
+  if (req.method === 'POST' && url.pathname === '/api/cycle-model') {
+    sendCommand({ id: 'cycle-model-' + (++cmdSeq), type: 'cycle_model' });
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/set-model') {
+    let body;
+    try { body = JSON.parse(await readBody(req) || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+    if (!body.provider || !body.modelId) return json(res, 400, { error: 'provider and modelId required' });
+    sendCommand({ id: 'set-model-' + (++cmdSeq), type: 'set_model', provider: body.provider, modelId: body.modelId });
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/models') {
+    (async () => {
+      try {
+        const [state, modelsResp] = await Promise.all([
+          sendCommandAndWait({ type: 'get_state' }),
+          sendCommandAndWait({ type: 'get_available_models' }),
+        ]);
+        json(res, 200, {
+          model: state?.model || null,
+          thinkingLevel: state?.thinkingLevel || null,
+          models: modelsResp?.models || [],
+        });
+      } catch (err) {
+        json(res, 500, { error: err.message });
+      }
+    })();
+    return;
+  }
+
   json(res, 404, { error: 'not found' });
 });
 
@@ -510,7 +607,15 @@ server.listen(PORT, HOST, () => {
 
 function shutdown() {
   console.log('\n[pi-webui] shutting down');
-  try { child.kill('SIGTERM'); } catch { /* ignore */ }
+  try {
+    if (ON_WINDOWS && child.pid) {
+      // pi sits under the cmd.exe wrapper spawned by spawnPi; kill the tree
+      const taskkill = `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\taskkill.exe`;
+      spawn(taskkill, ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      child.kill('SIGTERM');
+    }
+  } catch { /* ignore */ }
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1500);
 }
