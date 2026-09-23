@@ -321,6 +321,7 @@
   let currentSessionPath = null;   // active session file (from pi get_state)
   let sessionList = [];            // last /sessions result
   let focusAfterSnapshot = false;  // focus input + reveal newest reply after a switch
+  let stickToBottom = true;        // follow streaming output while pinned to the bottom
 
   let streaming = false;
   let currentAssistant = null;        // wrapper element for the in-flight assistant msg
@@ -414,9 +415,13 @@
     return fallbackMd(src ?? '');
   }
 
+  function atBottom(tolerance) {
+    return main.scrollHeight - main.scrollTop - main.clientHeight <= (tolerance || 80);
+  }
+
+  // Keep the newest output in view while the user is following along at the bottom.
   function scroll() {
-    const nearBottom = main.scrollHeight - main.scrollTop - main.clientHeight < 240;
-    if (nearBottom) main.scrollTop = main.scrollHeight;
+    if (stickToBottom) main.scrollTop = main.scrollHeight;
   }
 
   function el(tag, cls, html) {
@@ -990,11 +995,13 @@
     requestAnimationFrame(() => {
       const total = assistantNodes.length;
       if (total) {
+        stickToBottom = false;   // stay on the reply we jumped to
         const node = assistantNodes[total - 1];
         node.scrollIntoView({ block: 'start' });
         activeNode = node;
         refreshNav();
       } else {
+        stickToBottom = true;
         main.scrollTop = main.scrollHeight;
       }
       input.focus();
@@ -1073,7 +1080,10 @@
     const message = input.value.trim();
     if (!message) return;
     input.value = '';
+    // Sending a new instruction re-enables follow mode and jumps to the newest output.
+    stickToBottom = true;
     addUser(message);
+    main.scrollTop = main.scrollHeight;
     positionNav();
     await fetch('/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, behavior: 'steer' }) });
   }
@@ -1104,7 +1114,11 @@
     navListBtn.classList.remove('on');
   });
   window.addEventListener('resize', positionNav);
-  main.addEventListener('scroll', scheduleMarkActive, { passive: true });
+  main.addEventListener('scroll', () => {
+    // user (or a jump) moved the viewport: follow only while pinned to the bottom
+    stickToBottom = atBottom();
+    scheduleMarkActive();
+  }, { passive: true });
   document.addEventListener('keydown', (e) => {
     if (!e.altKey) return;
     if (e.key === 'ArrowUp') { e.preventDefault(); stepAssistant(-1); }
