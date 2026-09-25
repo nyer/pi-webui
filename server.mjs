@@ -385,7 +385,29 @@ function groupSessions(infos) {
   return out;
 }
 
-const INDEX = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+const INDEX_PATH = path.join(__dirname, 'public', 'index.html');
+
+/**
+ * Serve the app shell. Read it fresh on every request and forbid caching so a
+ * reload always picks up the current UI (mobile Firefox caches HTML hard when
+ * no Cache-Control is sent).
+ */
+function serveIndex(res) {
+  fs.readFile(INDEX_PATH, 'utf8', (err, html) => {
+    if (err) {
+      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('index.html unavailable');
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0',
+    });
+    res.end(html);
+  });
+}
 
 // Locate the marked + highlight.js bundles that pi ships for its HTML export,
 // so the browser gets the exact same Markdown pipeline as `pi --export`.
@@ -473,9 +495,36 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (req.method === 'GET' && url.pathname === '/') {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(INDEX);
+    serveIndex(res);
     return;
+  }
+
+  // Static files under public/ (e.g. /doudizhu or /doudizhu.html).
+  if (req.method === 'GET') {
+    const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+    if (rel && !rel.split(/[\\/]/).includes('..')) {
+      let file = path.join(__dirname, 'public', rel);
+      if (!path.extname(file)) file += '.html';
+      const publicRoot = path.join(__dirname, 'public') + path.sep;
+      if (file.startsWith(publicRoot) && path.basename(file) !== 'index.html' && fs.existsSync(file) && fs.statSync(file).isFile()) {
+        const type = {
+          '.html': 'text/html; charset=utf-8',
+          '.js': 'application/javascript; charset=utf-8',
+          '.css': 'text/css; charset=utf-8',
+          '.webmanifest': 'application/manifest+json',
+          '.json': 'application/json; charset=utf-8',
+          '.svg': 'image/svg+xml',
+          '.png': 'image/png',
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.webp': 'image/webp',
+          '.ico': 'image/x-icon',
+        }[path.extname(file).toLowerCase()] || 'application/octet-stream';
+        res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+        fs.createReadStream(file).pipe(res);
+        return;
+      }
+    }
   }
 
   if (req.method === 'GET' && url.pathname.startsWith('/vendor/')) {

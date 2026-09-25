@@ -98,7 +98,9 @@ Any extra args are forwarded to `pi`.
     Trash; the active session can't be deleted
   - the `☰` button in the header collapses/expands the sidebar (auto-collapsed on
     narrow screens, remembered in `localStorage`); on phones it becomes an
-    off-canvas drawer with a dim backdrop
+    off-canvas drawer with a dim backdrop. You can also **swipe right anywhere to
+    open it and swipe left to close it** (vertical scrolling and horizontal code
+    blocks are left untouched).
 - **Markdown** rendering (`marked` + `highlight.js`, matching pi's `--export`
   pipeline): headings, lists, tables, task lists, strikethrough, code highlighting;
   raw HTML is escaped and link schemes are allow-listed.
@@ -110,6 +112,17 @@ Any extra args are forwarded to `pi`.
 - Floating control above the composer: `▲ / ▼` jump between replies with a `n/total`
   counter, `☰` opens the **历史输入** list to jump to any past input. It is positioned
   above the input box so it never covers the composer or Send button.
+- **Installable (PWA)**: `public/manifest.webmanifest` + `public/sw.js` plus the
+  icons in `public/icons/` (regenerate with `node tools/gen-icons.mjs`) make the
+  web UI installable (“Add to Home Screen”) and open it standalone. The service
+  worker caches only the **app shell** — HTML, vendor bundles and icons; live data
+  (`/events`, `/sessions`, `/api/*`) always goes to the network. Service workers
+  need a secure context: `http://127.0.0.1:8787` / `localhost` works, a LAN IP over
+  plain HTTP will silently skip registration. **Firefox for Android** has no
+  install-prompt API and is strict about the manifest MIME type: it must be served
+  as `application/manifest+json` (the server does). Install it from the browser
+  menu (⋮ → 安装 / 添加到主屏幕); the header `⤓` button surfaces that hint when no
+  native install prompt is available.
 
 ## Endpoints
 

@@ -4,6 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>pi · web</title>
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#161b22" />
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="pi" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <style>
   :root {
     --bg: #0e1116; --panel: #161b22; --panel-2: #1c2230; --border: #2a3240;
@@ -97,8 +106,12 @@
   .trace-body { padding: 6px 8px 8px; display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--border); }
 
   .think { border-left: 2px solid #3a4657; padding: 2px 0 2px 9px; }
-  .think .think-label { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin-bottom: 3px; }
-  .think .inner { white-space: pre-wrap; color: #b8c4d4; font-size: 12.5px; }
+  .think > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; }
+  .think > summary::-webkit-details-marker { display: none; }
+  .think > summary::before { content: '▸'; color: var(--muted); font-size: 10px; transition: transform .15s; }
+  .think[open] > summary::before { transform: rotate(90deg); }
+  .think .think-label { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .think .inner { white-space: pre-wrap; color: #b8c4d4; font-size: 12.5px; margin-top: 3px; }
 
   .tool { margin: 8px 0; border: 1px solid var(--border); border-radius: 8px; background: var(--tool); padding: 6px 10px; }
   .trace-body .tool { margin: 0; }
@@ -117,7 +130,7 @@
     display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
   }
   .nav-bar {
-    display: flex; align-items: center; gap: 2px;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
     background: var(--panel); border: 1px solid var(--border);
     border-radius: 999px; padding: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.35);
   }
@@ -131,11 +144,11 @@
   .nav-btn:disabled { opacity: .3; cursor: default; }
   .nav-btn.on { background: var(--panel-2); color: var(--accent); }
   .nav-pos {
-    min-width: 48px; text-align: center; user-select: none;
-    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    min-width: 34px; text-align: center; user-select: none;
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted);
   }
   .nav-pos.at { color: var(--fg); }
-  .nav-sep { width: 1px; height: 20px; background: var(--border); margin: 0 3px; }
+  .nav-sep { width: 20px; height: 1px; background: var(--border); margin: 3px 0; }
 
   .nav-panel {
     width: min(380px, 88vw); background: var(--panel); border: 1px solid var(--border);
@@ -323,6 +336,7 @@
   <span class="model" id="model">connecting…</span>
   <span class="spacer"></span>
   <span id="status">connecting</span>
+  <button class="icon-btn" id="installBtn" title="安装到主屏幕" style="display:none">⤓</button>
 </header>
 
 <div id="layout">
@@ -400,6 +414,7 @@
   const navPos = document.getElementById('navPos');
   const navListBtn = document.getElementById('navListBtn');
   const navPanel = document.getElementById('navPanel');
+  const navBar = nav.querySelector('.nav-bar');
   const navList = document.getElementById('navList');
   const navTotal = document.getElementById('navTotal');
   const navPanelClose = document.getElementById('navPanelClose');
@@ -421,6 +436,8 @@
   let sessionList = [];            // last /sessions result
   let focusAfterSnapshot = false;  // focus input + reveal newest reply after a switch
   let stickToBottom = true;        // follow streaming output while pinned to the bottom
+  let lastScrollTop = 0;           // last observed viewport offset (to detect a scroll-up)
+  let autoScrolling = false;       // true while we move the viewport ourselves
 
   let streaming = false;
   let currentAssistant = null;        // wrapper element for the in-flight assistant msg
@@ -536,8 +553,13 @@
   }
 
   // Keep the newest output in view while the user is following along at the bottom.
+  // While the user has scrolled up to read, new output must never yank the page down.
   function scroll() {
-    if (stickToBottom) main.scrollTop = main.scrollHeight;
+    if (!stickToBottom) return;
+    if (atBottom(2)) return;   // already pinned to the bottom
+    autoScrolling = true;
+    main.scrollTop = main.scrollHeight;
+    requestAnimationFrame(() => { autoScrolling = false; });
   }
 
   function el(tag, cls, html) {
@@ -673,10 +695,11 @@
     return d;
   }
 
-  /** Build a thinking block for the trace. */
+  /** Build a collapsible thinking block for the trace (click the header to toggle). */
   function makeThinkBlock(text) {
-    const d = el('div', 'think');
-    d.appendChild(el('div', 'think-label', '思考'));
+    const d = el('details', 'think');
+    d.open = true;   // show the reasoning, but let the user collapse it
+    d.appendChild(el('summary', 'think-label', '思考'));
     d.appendChild(el('div', 'inner', esc(text || '')));
     return d;
   }
@@ -818,7 +841,8 @@
   function positionNav() {
     const h = footerEl ? footerEl.getBoundingClientRect().height : 80;
     nav.style.bottom = Math.round(h + 12) + 'px';
-    const avail = Math.max(180, window.innerHeight - h - 130);
+    const barH = navBar ? navBar.getBoundingClientRect().height : 40;
+    const avail = Math.max(160, window.innerHeight - h - 12 - barH - 24);
     navPanel.style.maxHeight = Math.min(avail, Math.round(window.innerHeight * 0.6)) + 'px';
   }
 
@@ -1245,6 +1269,47 @@
     document.body.classList.toggle('sb-open', mobile && !sidebar.classList.contains('collapsed'));
   }
 
+  /* ---------------- swipe to open/close the session sidebar ---------------- */
+  (function initSidebarSwipe() {
+    const TRIGGER = 56;   // horizontal travel needed to toggle
+    const NO_SWIPE = 'pre, table, textarea, input, select, [contenteditable="true"]';
+    let startX = 0, startY = 0, axis = null, tracking = false;
+
+    function blocked(target) {
+      return !!(target && target.nodeType === 1 && target.closest && target.closest(NO_SWIPE));
+    }
+
+    document.addEventListener('touchstart', (e) => {
+      tracking = false;
+      if (e.touches.length !== 1) return;
+      if (backdrop.classList.contains('show') || lightbox.classList.contains('show')) return;
+      if (!sidebar || blocked(e.target)) return;
+      const t = e.touches[0];
+      startX = t.clientX; startY = t.clientY; axis = null; tracking = true;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+      if (!tracking || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (!axis) {
+        if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+        // Require a clearly horizontal gesture so vertical scrolling still works.
+        axis = Math.abs(dx) > Math.abs(dy) * 1.3 ? 'x' : 'y';
+      }
+      if (axis !== 'x') return;
+      if (e.cancelable) e.preventDefault();   // keep the browser's own swipe/back gesture out of it
+      const collapsed = sidebar.classList.contains('collapsed');
+      if (dx >= TRIGGER && collapsed) { tracking = false; toggleSidebar(false); }   // 右划展开
+      else if (dx <= -TRIGGER && !collapsed) { tracking = false; toggleSidebar(true); } // 左划收起
+    }, { passive: false });
+
+    const stop = () => { tracking = false; axis = null; };
+    document.addEventListener('touchend', stop, { passive: true });
+    document.addEventListener('touchcancel', stop, { passive: true });
+  })();
+
   /* ---------------- transport ---------------- */
 
   function connect() {
@@ -1304,9 +1369,33 @@
   });
   window.addEventListener('resize', () => { positionNav(); updateSbBackdrop(); });
   main.addEventListener('scroll', () => {
-    // user (or a jump) moved the viewport: follow only while pinned to the bottom
-    stickToBottom = atBottom();
+    const top = main.scrollTop;
+    if (autoScrolling) {
+      // Our own programmatic scroll: keep following, don't treat it as a takeover.
+      lastScrollTop = top;
+    } else if (top < lastScrollTop - 2) {
+      // The user scrolled up to read — pause follow mode.
+      stickToBottom = false;
+      lastScrollTop = top;
+    } else {
+      // Resume following only once the viewport is back at the bottom.
+      stickToBottom = atBottom();
+      lastScrollTop = top;
+    }
     scheduleMarkActive();
+  }, { passive: true });
+  // A deliberate upward wheel gesture pauses follow mode immediately, before the
+  // programmatic auto-scroll can race the user's own scroll event.
+  main.addEventListener('wheel', (e) => { if (e.deltaY < 0) stickToBottom = false; }, { passive: true });
+  // Touch: dragging the finger down moves the content down (reading earlier output).
+  let touchStartY = null;
+  main.addEventListener('touchstart', (e) => {
+    touchStartY = e.touches && e.touches[0] ? e.touches[0].clientY : null;
+  }, { passive: true });
+  main.addEventListener('touchmove', (e) => {
+    const y = e.touches && e.touches[0] ? e.touches[0].clientY : null;
+    if (touchStartY != null && y != null && y - touchStartY > 4) stickToBottom = false;
+    if (y != null) touchStartY = y;
   }, { passive: true });
   document.addEventListener('keydown', (e) => {
     if (!e.altKey) return;
@@ -1516,6 +1605,71 @@
   loadSessions();
   connect();
 })();
+</script>
+<script>
+  // PWA: app-shell service worker + install affordance.
+  // Works on a secure context (http://localhost / https). Firefox for Android
+  // and iOS have no install-prompt API, so we surface a manual hint instead.
+  (function () {
+    var installBtn = document.getElementById('installBtn');
+    var ua = navigator.userAgent;
+    var isFirefox = /firefox|fxios/i.test(ua);
+    var isIOS = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var isMobile = /android|iphone|ipad|ipod|mobile/i.test(ua);
+    var standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+      || window.navigator.standalone === true;
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function (err) {
+          console.warn('[pi-webui] service worker registration failed:', err);
+        });
+      });
+      // Reload once when an updated worker takes over (not on first install).
+      if (navigator.serviceWorker.controller) {
+        var refreshed = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+          if (refreshed) return;
+          refreshed = true;
+          window.location.reload();
+        });
+      }
+    }
+
+    if (!installBtn || standalone) return;
+
+    var deferredPrompt = null;
+
+    // Android/desktop Chromium exposes a native install prompt.
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      deferredPrompt = e;
+      installBtn.style.display = '';
+    });
+
+    // Firefox / iOS never fire beforeinstallprompt — show a manual hint on mobile.
+    if (isMobile && (isFirefox || isIOS)) installBtn.style.display = '';
+
+    window.addEventListener('appinstalled', function () {
+      deferredPrompt = null;
+      installBtn.style.display = 'none';
+    });
+
+    installBtn.addEventListener('click', function () {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        var choice = deferredPrompt.userChoice;
+        if (choice && choice.then) choice.then(function () { deferredPrompt = null; installBtn.style.display = 'none'; });
+        else { deferredPrompt = null; installBtn.style.display = 'none'; }
+        return;
+      }
+      var msg;
+      if (isFirefox) msg = '安装到主屏幕：\n点右下角/右上角的菜单（⋮）→ 「安装」或「添加到主屏幕」。';
+      else if (isIOS) msg = '安装到主屏幕：\n点「分享」图标 → 「添加到主屏幕」。';
+      else msg = '安装到主屏幕：\n打开浏览器菜单，选择「安装应用」或「添加到主屏幕」。';
+      window.alert(msg);
+    });
+  })();
 </script>
 </body>
 </html>
