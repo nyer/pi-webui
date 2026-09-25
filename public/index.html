@@ -260,7 +260,21 @@
   #backdrop.show { display: flex; }
   #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 100; cursor: zoom-out; }
   #lightbox.show { display: flex; }
-  #lightbox img { max-width: 94vw; max-height: 94vh; object-fit: contain; border-radius: 4px; box-shadow: 0 4px 40px rgba(0,0,0,.5); }
+  .mermaid { position: relative; font-family: var(--mono); font-size: 13px; white-space: pre-wrap; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; margin: 8px 0; overflow-x: auto; line-height: 1.6; color: var(--fg); }
+  .mermaid .mermaid-toggle {
+    position: absolute; top: 6px; right: 6px;
+    width: 26px; height: 26px; padding: 0;
+    background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 5px; color: #bbb; font-size: 11px; cursor: pointer;
+    font-family: var(--mono); line-height: 1;
+    display: none; align-items: center; justify-content: center; z-index: 2;
+    opacity: .6; transition: opacity .15s;
+  }
+  .mermaid .mermaid-toggle:hover { opacity: 1; color: #fff; background: rgba(0,0,0,.7); }
+  .mermaid:hover .mermaid-toggle { display: flex; }
+  .mermaid-render svg { display: block; margin: 0 auto; max-width: 100%; cursor: zoom-in; }
+  .mermaid-src { margin: 0; font-size: 13px; line-height: 1.6; display: none; }
+  .mermaid-src code { font-family: var(--mono); }
   .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; width: min(520px, 92vw); }
   .modal h3 { margin: 0 0 10px; font-size: 15px; }
   .modal .opts { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
@@ -395,6 +409,7 @@
 
 <script src="/vendor/marked.min.js"></script>
 <script src="/vendor/highlight.min.js"></script>
+<script src="/vendor/mermaid.min.js"></script>
 <script>
 (function () {
   const wrap = document.getElementById('wrap');
@@ -452,7 +467,7 @@
 
   const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
-  // ---- Markdown: use pi's bundled marked + highlight.js, mirroring the
+  // ---- Markdown: use pi's bundled marked + highlight.js + mermaid, mirroring the
   // ---- exact renderer config used by `pi --export` (HTML disabled, URL allow-list).
   function initMarkdown() {
     if (typeof marked === 'undefined') return false;
@@ -502,6 +517,9 @@
           },
           code(token) {
             const text = token.text, lang = token.lang;
+            if (lang === 'mermaid') {
+              return '<div class="mermaid">' + esc(text) + '</div>';
+            }
             if (!hl) return '<pre><code>' + esc(text) + '</code></pre>';
             let out;
             if (lang && hl.getLanguage(lang)) {
@@ -522,6 +540,72 @@
   }
   const MD_ENABLED = initMarkdown();
   console.log('[pi-webui] markdown:', MD_ENABLED ? 'marked' + (typeof hljs !== 'undefined' ? ' + highlight.js' : '') : 'built-in fallback');
+
+  // ---- Mermaid diagrams ----
+  if (typeof mermaid !== 'undefined') {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'dark',
+      securityLevel: 'loose',
+    });
+  }
+
+  function renderMermaidBlocks(container) {
+    if (typeof mermaid === 'undefined') return;
+    // Only process elements not yet handled
+    const blocks = container.querySelectorAll('.mermaid:not([data-processed])');
+    if (!blocks.length) return;
+    // Save source text before mermaid.run() replaces innerHTML
+    for (const div of blocks) {
+      div.dataset.source = div.textContent;
+    }
+    mermaid.run({ nodes: blocks }).then(() => {
+      blocks.forEach(div => {
+        const svg = div.querySelector('svg');
+        if (!svg) {
+          // Rendering failed — show source as a code block
+          div.classList.add('mermaid-error');
+          div.innerHTML = '<pre><code>' + esc(div.dataset.source || '') + '</code></pre>';
+          return;
+        }
+        div.dataset.processed = '1';
+        // Wrap rendered SVG
+        const renderDiv = document.createElement('div');
+        renderDiv.className = 'mermaid-render';
+        renderDiv.innerHTML = svg.outerHTML;
+        // Hidden source-code view
+        const srcPre = document.createElement('pre');
+        srcPre.className = 'mermaid-src';
+        srcPre.innerHTML = '<code>' + esc(div.dataset.source || '') + '</code>';
+        // Rebuild: clear and append children
+        div.innerHTML = '';
+        div.appendChild(renderDiv);
+        div.appendChild(srcPre);
+        // Toggle button
+        const toggle = document.createElement('button');
+        toggle.className = 'mermaid-toggle';
+        toggle.textContent = '{}';
+        toggle.title = '切换源码/视图';
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const showingSrc = srcPre.style.display !== 'none';
+          renderDiv.style.display = showingSrc ? '' : 'none';
+          srcPre.style.display = showingSrc ? 'none' : '';
+          toggle.textContent = showingSrc ? '{}' : '◇';
+        });
+        div.appendChild(toggle);
+        // Click zoom on rendered diagram
+        const newSvg = renderDiv.querySelector('svg');
+        if (newSvg) {
+          newSvg.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const dataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(newSvg.outerHTML);
+            openLightbox(dataUrl);
+          });
+        }
+      });
+    }).catch(() => {});
+  }
 
   function fallbackMd(src) {
     const parts = String(src).split('```');
@@ -859,7 +943,7 @@
 
   // rAF-throttled markdown repaint for streaming text.
   const pendingPaint = new WeakMap();
-  function paint(b) { b.el.innerHTML = renderMarkdown(b.raw); scroll(); }
+  function paint(b) { b.el.innerHTML = renderMarkdown(b.raw); renderMermaidBlocks(b.el); scroll(); }
   function schedulePaint(b) {
     if (pendingPaint.has(b)) return;
     const id = requestAnimationFrame(() => { pendingPaint.delete(b); paint(b); });
@@ -912,7 +996,9 @@
     const tb = traceBodyOf(box);
     for (const c of m.content || []) {
       if (c.type === 'text') {
-        bodyOf(box).appendChild(el('div', 'md', renderMarkdown(c.text)));
+        const md = el('div', 'md', renderMarkdown(c.text));
+        bodyOf(box).appendChild(md);
+        renderMermaidBlocks(md);
       } else if (c.type === 'thinking') {
         tb.appendChild(makeThinkBlock(c.thinking || ''));
       } else if (c.type === 'toolCall') {
@@ -977,18 +1063,21 @@
     switch (ev.type) {
       case 'snapshot':
         handleSnapshot(ev);
+        if (currentAssistant) renderMermaidBlocks(bodyOf(currentAssistant));
         break;
       case 'agent_start':
         streaming = true; setStatus(); break;
       case 'agent_end':
-        streaming = false; setStatus(); syncNav(); break;
+        streaming = false; setStatus(); syncNav();
+        if (currentAssistant) renderMermaidBlocks(bodyOf(currentAssistant));
+        break;
       case 'agent_settled':
         streaming = false; currentAssistant = null; setStatus(); syncNav(); break;
       case 'message_start':
         if (ev.message && ev.message.role === 'assistant') { ensureReply(); msgSeq++; }
         break;
       case 'message_end':
-        if (ev.message && ev.message.role === 'assistant') { flushPaint(); syncNav(); }
+        if (ev.message && ev.message.role === 'assistant') { flushPaint(); syncNav(); if (currentAssistant) renderMermaidBlocks(bodyOf(currentAssistant)); }
         break;
       case 'message_update': {
         ensureReply();

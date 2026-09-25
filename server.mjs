@@ -529,7 +529,12 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname.startsWith('/vendor/')) {
     const name = path.basename(url.pathname);
-    const file = VENDOR_DIR && path.join(VENDOR_DIR, name);
+    let file = VENDOR_DIR && path.join(VENDOR_DIR, name);
+    if (!file || !fs.existsSync(file)) {
+      // fall back to project-local vendor dir
+      const local = path.join(__dirname, 'vendor', name);
+      if (fs.existsSync(local)) file = local;
+    }
     if (!file || !fs.existsSync(file)) return json(res, 404, { error: 'vendor asset not found' });
     res.writeHead(200, {
       'Content-Type': 'application/javascript; charset=utf-8',
