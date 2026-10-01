@@ -828,7 +828,7 @@
     if (!total) return;
     i = Math.max(0, Math.min(total - 1, i));
     const node = assistantNodes[i];
-    node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    jumpTo(node, 'start');   // no scroll animation when stepping through replies
     node.classList.remove('flash');
     void node.offsetWidth;
     node.classList.add('flash');
