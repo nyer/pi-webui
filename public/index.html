@@ -449,7 +449,8 @@
   let msgSeq = 0;            // increments per assistant message inside a merged reply
   let currentSessionPath = null;   // active session file (from pi get_state)
   let sessionList = [];            // last /sessions result
-  let focusAfterSnapshot = false;  // focus input + reveal newest reply after a switch
+  let focusAfterSnapshot = false;   // new session: focus input + reveal newest reply
+  let revealAfterSnapshot = false;  // history switch: reveal newest reply, keep input inactive
   let stickToBottom = true;        // follow streaming output while pinned to the bottom
   let lastScrollTop = 0;           // last observed viewport offset (to detect a scroll-up)
   let autoScrolling = false;       // true while we move the viewport ourselves
@@ -1054,7 +1055,11 @@
     scheduleMarkActive();
     if (focusAfterSnapshot) {
       focusAfterSnapshot = false;
+      revealAfterSnapshot = false;
       revealLatestAndFocus();
+    } else if (revealAfterSnapshot) {
+      revealAfterSnapshot = false;
+      revealLatest();
     }
     scroll();
   }
@@ -1277,10 +1282,8 @@
     }
   }
 
-  /** Jump straight to the newest body-text message, then focus the composer. */
-  function revealLatestAndFocus() {
-    // Synchronous so the session never paints a scroll animation: the first
-    // frame the user sees is already positioned on the newest message.
+  /** Reveal the newest body-text message without scrolling animation. */
+  function revealLatest() {
     const total = assistantNodes.length;
     if (total) {
       stickToBottom = false;   // stay on the message we jumped to
@@ -1294,13 +1297,33 @@
       jumpTo(null);
     }
     scheduleMarkActive();
-    input.focus();
+  }
+
+  /** Reveal the newest message and drop the caret into the composer. */
+  function revealLatestAndFocus() {
+    revealLatest();
+    focusComposer();
+  }
+
+  /** Focus the composer. Call synchronously from a tap so mobile browsers treat
+   *  it as user-initiated and open the soft keyboard. */
+  function focusComposer() {
+    try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+    // A tapped control can steal focus right after the click; make sure we win.
+    requestAnimationFrame(() => {
+      if (document.activeElement !== input) {
+        try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+      }
+    });
   }
 
   async function switchSession(p) {
     if (!p) return;
-    if (p === currentSessionPath) { input.focus(); return; }
-    focusAfterSnapshot = true;
+    // Opening a history session reveals the newest reply but deliberately does
+    // NOT activate the composer, so the soft keyboard stays down while reading.
+    if (p === currentSessionPath) return;
+    revealAfterSnapshot = true;
+    focusAfterSnapshot = false;
     hintEl.textContent = '正在切换会话…';
     try {
       const r = await fetch('/switch-session', {
@@ -1313,14 +1336,16 @@
       updateSidebarActive();
       if (window.innerWidth <= 860) toggleSidebar(true);
     } catch (err) {
-      focusAfterSnapshot = false;
+      revealAfterSnapshot = false;
       addSystem('切换会话失败: ' + err.message);
       loadSessions();
     }
   }
 
   async function newSession() {
+    focusComposer();
     focusAfterSnapshot = true;
+    revealAfterSnapshot = false;
     try {
       const r = await fetch('/new-session', { method: 'POST' });
       if (!r.ok) throw new Error('new session failed');

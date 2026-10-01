@@ -93,7 +93,8 @@ Any extra args are forwarded to `pi`.
   a new file per run, so files linked by `parentSession` are merged into one entry
   with a `＋N 分支` badge (the active one is preferred as the representative).
   - click a session → switch the running session, then the newest body-text reply
-    is revealed and the composer is focused
+    is revealed; the composer is deliberately left **unfocused** so the mobile
+    keyboard stays down while you read (starting a *new* session still focuses it)
   - `＋` starts a **new session**, `⟳` refreshes, `×` (hover) moves a session to the
     Trash; the active session can't be deleted
   - the `☰` button in the header collapses/expands the sidebar (auto-collapsed on
