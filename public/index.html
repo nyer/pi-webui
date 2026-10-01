@@ -34,7 +34,6 @@
     position: sticky; top: 0; z-index: 10;
   }
   header .title { font-weight: 700; letter-spacing: .2px; }
-  header .model { color: var(--muted); font-family: var(--mono); font-size: 12px; }
   header .spacer { flex: 1; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
   .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
@@ -291,7 +290,6 @@
     html, body { height: 100dvh; }
     header { padding: 8px 12px; padding-top: calc(8px + env(safe-area-inset-top)); gap: 8px; }
     header .title { font-size: 15px; }
-    header .model { font-size: 11px; max-width: 45vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     /* Sidebar becomes an off-canvas drawer over the chat column */
     #sidebar {
@@ -335,7 +333,6 @@
 
   @media (max-width: 560px) {
     #status { display: none; }
-    header .model { max-width: 52vw; }
     .msg .body { padding: 9px 10px; }
     .msg .role { padding: 5px 10px; }
     .nav-panel { width: 92vw; }
@@ -347,10 +344,10 @@
   <button class="icon-btn" id="sbToggle" title="显示/隐藏历史会话">☰</button>
   <span class="dot" id="dot"></span>
   <span class="title">pi</span>
-  <span class="model" id="model">connecting…</span>
   <span class="spacer"></span>
   <span id="status">connecting</span>
   <button class="icon-btn" id="installBtn" title="安装到主屏幕" style="display:none">⤓</button>
+  <button class="icon-btn" id="hdrNew" title="开启新会话" aria-label="开启新会话">＋</button>
 </header>
 
 <div id="layout">
@@ -418,7 +415,6 @@
   const sendBtn = document.getElementById('send');
   const stopBtn = document.getElementById('stop');
   const dot = document.getElementById('dot');
-  const modelEl = document.getElementById('model');
   const statusEl = document.getElementById('status');
   const hintEl = document.getElementById('hint');
   const backdrop = document.getElementById('backdrop');
@@ -439,6 +435,7 @@
   const sbList = document.getElementById('sbList');
   const sbRefresh = document.getElementById('sbRefresh');
   const sbNew = document.getElementById('sbNew');
+  const hdrNew = document.getElementById('hdrNew');
   const sbBackdrop = document.getElementById('sbBackdrop');
 
   let allAssistant = [];     // every merged reply box, in document order
@@ -1037,7 +1034,6 @@
       }
     }
     if (data.state && data.state.model) {
-      modelEl.textContent = data.state.model.id + ' · ' + data.state.model.provider;
       updateModelLabel(data.state.model.provider, data.state.model.id, data.state.thinkingLevel, data.state.model);
     }
     if (data.state && data.state.sessionId) {
@@ -1472,6 +1468,7 @@
   sbBackdrop.addEventListener('click', () => toggleSidebar(true));
   sbRefresh.addEventListener('click', () => loadSessions());
   sbNew.addEventListener('click', () => newSession());
+  hdrNew.addEventListener('click', () => newSession());
   navListBtn.addEventListener('click', () => {
     const open = navPanel.classList.toggle('hidden') === false;
     navListBtn.classList.toggle('on', open);

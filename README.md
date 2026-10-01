@@ -101,7 +101,8 @@ Any extra args are forwarded to `pi`.
     narrow screens, remembered in `localStorage`); on phones it becomes an
     off-canvas drawer with a dim backdrop. You can also **swipe right anywhere to
     open it and swipe left to close it** (vertical scrolling and horizontal code
-    blocks are left untouched).
+    blocks are left untouched). The header `＋` button starts a new session, same
+    as the sidebar's.
 - **Markdown** rendering (`marked` + `highlight.js`, matching pi's `--export`
   pipeline): headings, lists, tables, task lists, strikethrough, code highlighting;
   raw HTML is escaped and link schemes are allow-listed.
