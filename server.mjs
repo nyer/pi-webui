@@ -9,6 +9,13 @@
  *   POST /abort            abort the current run
  *   POST /ui-response      answer an extension_ui_request dialog
  *   GET  /health           liveness
+ *   GET  /api/models       models + current model + thinking levels
+ *   POST /api/set-model    switch model
+ *   POST /api/set-thinking set reasoning/thinking level
+ *   GET  /api/skills       skill commands discovered by pi
+ *   GET  /api/model-config settings.json defaults + models.json text
+ *   POST /api/model-config write settings.json defaults / models.json
+ *   POST /api/restart-pi   restart pi (reload config / models / skills)
  *
  * Usage:
  *   node server.mjs [--port 8787] [--host 127.0.0.1]
@@ -48,15 +55,18 @@ const PORT = opts.port || Number(process.env.PI_WEBUI_PORT) || 8787;
 const HOST = opts.host || process.env.PI_WEBUI_HOST || '127.0.0.1';
 const PI_BIN = opts.piBin || process.env.PI_WEBUI_PI || 'pi';
 
-const piArgs = ['--mode', 'rpc'];
-if (opts.provider) piArgs.push('--provider', opts.provider);
-if (opts.model) piArgs.push('--model', opts.model);
-if (opts.thinking) piArgs.push('--thinking', opts.thinking);
-if (opts.session) piArgs.push('--session', opts.session);
-else if (opts.fork) piArgs.push('--fork', opts.fork);
-piArgs.push(...opts.piArgs);
+// Args shared by every spawn (session flags are added per run).
+const basePiArgs = ['--mode', 'rpc'];
+if (opts.provider) basePiArgs.push('--provider', opts.provider);
+if (opts.model) basePiArgs.push('--model', opts.model);
+if (opts.thinking) basePiArgs.push('--thinking', opts.thinking);
+basePiArgs.push(...opts.piArgs);
 
-console.log(`[pi-webui] spawning: ${PI_BIN} ${piArgs.join(' ')}`);
+const initialPiArgs = [...basePiArgs];
+if (opts.session) initialPiArgs.push('--session', opts.session);
+else if (opts.fork) initialPiArgs.push('--fork', opts.fork);
+
+console.log(`[pi-webui] spawning: ${PI_BIN} ${initialPiArgs.join(' ')}`);
 
 /* On Windows, npm installs `pi` as pi.cmd / pi (sh shim); node's spawn can't
  * exec either (no PATHEXT resolution, .cmd needs a shell). Route through
@@ -72,10 +82,38 @@ function spawnPi(bin, args, opts) {
     { ...opts, windowsVerbatimArguments: true });
 }
 
-const child = spawnPi(PI_BIN, piArgs, {
-  stdio: ['pipe', 'pipe', 'pipe'],
-  env: { ...process.env, PI_CODING_AGENT: 'true' },
-});
+/** @type {import('node:child_process').ChildProcess | null} */
+let child = null;
+
+/** (Re)spawn the pi RPC process and wire its streams. */
+function startPi(args) {
+  const proc = spawnPi(PI_BIN, args, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, PI_CODING_AGENT: 'true' },
+  });
+  child = proc;
+  attachJsonlReader(proc.stdout, (line) => {
+    try {
+      routePiEvent(JSON.parse(line));
+    } catch (err) {
+      console.error('[pi-webui] bad JSON from pi:', line.slice(0, 200));
+    }
+  });
+  proc.stderr.on('data', (d) => {
+    const text = d.toString();
+    process.stderr.write(text);
+    broadcast({ type: 'stderr', text });
+  });
+  proc.on('exit', (code, signal) => {
+    isStreaming = false;
+    if (proc.intentionalStop) return;   // part of a restart; don't alarm clients
+    console.log(`[pi-webui] pi exited code=${code} signal=${signal}`);
+    broadcast({ type: 'pi_exit', code, signal });
+  });
+  return proc;
+}
+
+startPi(initialPiArgs);
 
 /* ------------------------------------------------------------------ */
 /* pi -> server                                                        */
@@ -106,7 +144,7 @@ function broadcast(obj) {
 }
 
 function sendCommand(cmd) {
-  if (!child.stdin || child.stdin.destroyed) return false;
+  if (!child || !child.stdin || child.stdin.destroyed) return false;
   child.stdin.write(JSON.stringify(cmd) + '\n');
   return true;
 }
@@ -225,28 +263,51 @@ function routePiEvent(ev) {
   broadcast(ev);
 }
 
-attachJsonlReader(child.stdout, (line) => {
-  try {
-    routePiEvent(JSON.parse(line));
-  } catch (err) {
-    console.error('[pi-webui] bad JSON from pi:', line.slice(0, 200));
-  }
-});
-
-child.stderr.on('data', (d) => {
-  const text = d.toString();
-  process.stderr.write(text);
-  broadcast({ type: 'stderr', text });
-});
-
 // Prime the active-session path so /health and /sessions are correct before any client connects.
 setTimeout(() => sendCommand({ id: 'boot-' + (++cmdSeq), type: 'get_state' }), 300);
 
-child.on('exit', (code, signal) => {
-  isStreaming = false;
-  console.log(`[pi-webui] pi exited code=${code} signal=${signal}`);
-  broadcast({ type: 'pi_exit', code, signal });
-});
+/* ------------------------------------------------------------------ */
+/* restart pi (reload models.json / settings.json / skills)            */
+/* ------------------------------------------------------------------ */
+
+/** Terminate the current pi process and wait for it to go away. */
+function stopPi() {
+  const proc = child;
+  if (!proc || proc.exitCode != null || proc.signalCode != null) return Promise.resolve();
+  proc.intentionalStop = true;
+  if (ON_WINDOWS && proc.pid) {
+    try {
+      const taskkill = `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\taskkill.exe`;
+      spawn(taskkill, ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+    } catch { /* ignore */ }
+    return new Promise((r) => setTimeout(r, 400));
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => { if (!settled) { settled = true; resolve(); } };
+    proc.once('exit', done);
+    try { proc.kill('SIGTERM'); } catch { return done(); }
+    setTimeout(done, 2500);
+  });
+}
+
+/** Restart pi, resuming the current session so the conversation is preserved. */
+async function restartPi() {
+  const session = currentSessionPath;
+  broadcast({ type: 'pi_restarting', session });
+  await stopPi();
+  const args = [...basePiArgs];
+  if (session) args.push('--session', session);
+  console.log(`[pi-webui] restarting pi: ${PI_BIN} ${args.join(' ')}`);
+  startPi(args);
+  // Wait until the new process answers, then push a fresh snapshot to everyone.
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    try { await sendCommandAndWait({ type: 'get_state' }, 2000); break; } catch { /* retry */ }
+  }
+  if (currentSessionPath) refreshAllClients();
+  broadcast({ type: 'pi_ready' });
+}
 
 /* ------------------------------------------------------------------ */
 /* HTTP server                                                         */
@@ -258,6 +319,51 @@ child.on('exit', (code, signal) => {
 
 const SESSIONS_ROOT = process.env.PI_WEBUI_SESSIONS_ROOT
   || path.join(os.homedir(), '.pi', 'agent', 'sessions');
+
+// Where pi keeps its global config (models.json / settings.json).
+const AGENT_DIR = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent');
+const SETTINGS_JSON_PATH = path.join(AGENT_DIR, 'settings.json');
+const MODELS_JSON_PATH = path.join(AGENT_DIR, 'models.json');
+
+function readTextSafe(file) {
+  try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }
+}
+
+/** Strip // and /* ... *\/ comments so config files parse the same way pi parses them. */
+function stripJsonComments(input) {
+  let out = '';
+  let inString = false, inLine = false, inBlock = false, escaped = false;
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i], n = input[i + 1];
+    if (inLine) { if (c === '\n') { inLine = false; out += c; } continue; }
+    if (inBlock) { if (c === '*' && n === '/') { inBlock = false; i++; } continue; }
+    if (inString) {
+      out += c;
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; out += c; continue; }
+    if (c === '/' && n === '/') { inLine = true; i++; continue; }
+    if (c === '/' && n === '*') { inBlock = true; i++; continue; }
+    out += c;
+  }
+  return out;
+}
+
+function readJsonSafe(file) {
+  try { return JSON.parse(stripJsonComments(fs.readFileSync(file, 'utf8'))) || {}; }
+  catch { return {}; }
+}
+
+/** Write via a temp file + rename so a crash can't leave a half-written config. */
+function writeFileAtomic(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = file + '.tmp-' + process.pid + '-' + Date.now();
+  fs.writeFileSync(tmp, text, 'utf8');
+  fs.renameSync(tmp, file);
+}
 
 const sessionCache = new Map(); // path -> { mtime, size, info }
 let currentSessionPath = null;
@@ -676,19 +782,123 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/models') {
     (async () => {
       try {
-        const [state, modelsResp] = await Promise.all([
+        const [state, modelsResp, levelsResp] = await Promise.all([
           sendCommandAndWait({ type: 'get_state' }),
           sendCommandAndWait({ type: 'get_available_models' }),
+          // Older pi builds may not expose thinking levels; don't stall the response for them.
+          sendCommandAndWait({ type: 'get_available_thinking_levels' }, 2500).catch(() => null),
         ]);
         json(res, 200, {
           model: state?.model || null,
           thinkingLevel: state?.thinkingLevel || null,
+          thinkingLevels: (levelsResp && levelsResp.levels) || null,
           models: modelsResp?.models || [],
         });
       } catch (err) {
         json(res, 500, { error: err.message });
       }
     })();
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/set-thinking') {
+    let body;
+    try { body = JSON.parse(await readBody(req) || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+    const level = String(body.level || '');
+    const allowed = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+    if (!allowed.includes(level)) return json(res, 400, { error: 'invalid thinking level' });
+    try {
+      await sendCommandAndWait({ type: 'set_thinking_level', level });
+      refreshAllClients();   // let every client pick up the new level
+      json(res, 200, { ok: true, level });
+    } catch (err) {
+      json(res, 500, { error: err.message });
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/skills') {
+    (async () => {
+      try {
+        const resp = await sendCommandAndWait({ type: 'get_commands' });
+        const commands = resp?.commands || [];
+        const skills = commands
+          .filter((c) => c && c.source === 'skill')
+          .map((c) => ({
+            name: String(c.name || '').replace(/^skill:/, ''),
+            command: c.name,
+            description: c.description || '',
+            location: c.location || null,
+            path: c.path || null,
+          }));
+        json(res, 200, { skills });
+      } catch (err) {
+        json(res, 500, { error: err.message });
+      }
+    })();
+    return;
+  }
+
+  /* ---- model configuration: ~/.pi/agent/settings.json + models.json ---- */
+
+  if (req.method === 'GET' && url.pathname === '/api/model-config') {
+    const settings = readJsonSafe(SETTINGS_JSON_PATH);
+    json(res, 200, {
+      settings: {
+        defaultProvider: settings.defaultProvider || null,
+        defaultModel: settings.defaultModel || null,
+        defaultThinkingLevel: settings.defaultThinkingLevel || null,
+      },
+      modelsText: readTextSafe(MODELS_JSON_PATH),
+      paths: { settings: SETTINGS_JSON_PATH, models: MODELS_JSON_PATH, agentDir: AGENT_DIR },
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/model-config') {
+    let body;
+    try { body = JSON.parse(await readBody(req) || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+    try {
+      if (body.settings && typeof body.settings === 'object') {
+        const cur = readJsonSafe(SETTINGS_JSON_PATH);
+        for (const key of ['defaultProvider', 'defaultModel', 'defaultThinkingLevel']) {
+          if (!(key in body.settings)) continue;
+          const val = body.settings[key];
+          if (val === null || val === '') delete cur[key];
+          else cur[key] = String(val);
+        }
+        writeFileAtomic(SETTINGS_JSON_PATH, JSON.stringify(cur, null, 2) + '\n');
+      }
+      if (typeof body.modelsText === 'string') {
+        const text = body.modelsText.trim();
+        if (text) {
+          let parsed;
+          try { parsed = JSON.parse(stripJsonComments(text)); }
+          catch (err) { return json(res, 400, { error: 'models.json 不是合法 JSON: ' + err.message }); }
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return json(res, 400, { error: 'models.json 顶层必须是一个 JSON 对象' });
+          }
+          if ('providers' in parsed && (typeof parsed.providers !== 'object' || parsed.providers === null || Array.isArray(parsed.providers))) {
+            return json(res, 400, { error: '"providers" 必须是一个对象' });
+          }
+          writeFileAtomic(MODELS_JSON_PATH, body.modelsText.endsWith('\n') ? body.modelsText : body.modelsText + '\n');
+        } else if (fs.existsSync(MODELS_JSON_PATH)) {
+          fs.unlinkSync(MODELS_JSON_PATH);
+        }
+      }
+      json(res, 200, { ok: true, restartRequired: true });
+    } catch (err) {
+      json(res, 500, { error: String(err.message || err) });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/restart-pi') {
+    restartPi().catch((err) => {
+      console.error('[pi-webui] restart failed:', err);
+      broadcast({ type: 'stderr', text: 'restart failed: ' + (err.message || err) });
+    });
+    json(res, 200, { ok: true, session: currentSessionPath || null });
     return;
   }
 
@@ -703,11 +913,11 @@ server.listen(PORT, HOST, () => {
 function shutdown() {
   console.log('\n[pi-webui] shutting down');
   try {
-    if (ON_WINDOWS && child.pid) {
+    if (child && ON_WINDOWS && child.pid) {
       // pi sits under the cmd.exe wrapper spawned by spawnPi; kill the tree
       const taskkill = `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\taskkill.exe`;
       spawn(taskkill, ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-    } else {
+    } else if (child) {
       child.kill('SIGTERM');
     }
   } catch { /* ignore */ }

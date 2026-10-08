@@ -20,6 +20,30 @@
     --user: #1f3a5f; --tool: #1d2a1f; --err: #5a2327; --ok: #3fb950;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
+  /* Light theme: swap the palette and soften the few hard-coded dark surfaces.
+     Code blocks stay dark on purpose (like GitHub), so hljs colours still work. */
+  [data-theme="light"] {
+    --bg: #f6f8fa; --panel: #ffffff; --panel-2: #f0f3f6; --border: #d0d7de;
+    --fg: #1f2328; --muted: #656d76; --accent: #0969da; --accent-2: #0550ae;
+    --user: #ddf4ff; --tool: #dafbe1; --err: #ffebe9; --ok: #1a7f37;
+  }
+  [data-theme="light"] .md h4, [data-theme="light"] .md h5, [data-theme="light"] .md h6 { color: #57606a; }
+  [data-theme="light"] .md blockquote { background: #f6f8fa; color: #57606a; }
+  [data-theme="light"] .think .inner { color: #57606a; }
+  [data-theme="light"] details.trace { background: #f6f8fa; }
+  [data-theme="light"] .msg.user { border-color: #b6e3ff; }
+  [data-theme="light"] .nav-item.active { background: #ddf4ff; border-color: #b6e3ff; }
+  [data-theme="light"] .tb-dropdown .opt.active { background: #ddf4ff; color: var(--accent); }
+  /* keep code/tool output dark in light mode so the hljs palette stays readable */
+  [data-theme="light"] .md code, [data-theme="light"] .md pre, [data-theme="light"] .tool pre { color: #e6edf3; }
+  [data-theme="light"] .think { border-left-color: #d0d7de; }
+  [data-theme="light"] .tool summary { color: #1a7f37; }
+  [data-theme="light"] .sb-item.active, [data-theme="light"] .sb-row.active .sb-item { background: #ddf4ff; border-color: #b6e3ff; }
+  [data-theme="light"] .sb-item-title, [data-theme="light"] .nav-text { color: #1f2328; }
+  body.font-sm { font-size: 13px; }
+  body.font-lg { font-size: 16px; }
+  /* "show thinking & tool calls" preference */
+  body.hide-trace .trace { display: none !important; }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
@@ -189,6 +213,8 @@
   }
   button:hover { background: var(--accent-2); }
   button.ghost { background: var(--panel-2); color: var(--fg); border: 1px solid var(--border); }
+  button.stop { background: var(--err); }
+  button.stop:hover { background: #7a2f34; }
   button:disabled { opacity: .45; cursor: default; }
   .hint { max-width: 920px; margin: 6px auto 0; color: var(--muted); font-size: 11.5px; }
 
@@ -254,6 +280,79 @@
   #chatcol { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .icon-btn { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 1px solid transparent; color: var(--fg); border-radius: 8px; cursor: pointer; font-size: 14px; padding: 0; }
   .icon-btn:hover { background: var(--panel-2); border-color: var(--border); }
+
+  /* ---- settings dialog ---- */
+  #settings { position: fixed; inset: 0; z-index: 70; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.55); padding: 24px; }
+  #settings.show { display: flex; }
+  .settings-panel {
+    width: min(660px, 96vw); max-height: min(780px, 92vh);
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .settings-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--border); }
+  .settings-head .settings-title { flex: 1; font-weight: 700; letter-spacing: .2px; }
+  .settings-tabs { display: flex; gap: 4px; padding: 8px 10px 0; border-bottom: 1px solid var(--border); }
+  .settings-tab {
+    background: transparent; border: none; border-bottom: 2px solid transparent;
+    color: var(--muted); padding: 8px 14px; border-radius: 8px 8px 0 0;
+    font: inherit; font-weight: 600; cursor: pointer;
+  }
+  .settings-tab:hover { color: var(--fg); background: var(--panel-2); }
+  .settings-tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+  .settings-body { padding: 6px 16px 16px; overflow-y: auto; flex: 1; min-height: 0; }
+  .set-sec { margin: 14px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .set-sec:first-child { margin-top: 10px; }
+  .set-row { display: flex; align-items: center; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+  .set-row:last-child { border-bottom: none; }
+  .set-row .set-col { flex: 1; min-width: 0; }
+  .set-row .set-name { font-weight: 600; }
+  .set-row .set-desc { color: var(--muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+  .seg { display: inline-flex; flex: none; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { background: transparent; color: var(--fg); border: none; border-radius: 0; padding: 6px 12px; font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button:hover:not(.active) { background: var(--panel-2); }
+  .seg button.active { background: var(--accent); color: #fff; }
+  .switch { flex: none; position: relative; width: 42px; height: 24px; padding: 0; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); cursor: pointer; transition: background .15s, border-color .15s; }
+  .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+  .switch.on { background: var(--accent); border-color: var(--accent); }
+  .switch.on::after { transform: translateX(18px); background: #fff; }
+  .set-btn { background: var(--panel-2); border: 1px solid var(--border); color: var(--fg); border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; flex: none; }
+  .set-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .set-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .set-btn.primary:hover { background: var(--accent-2); color: #fff; }
+  .set-search { width: 100%; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); padding: 8px 10px; font: inherit; font-size: 13px; margin: 2px 0 8px; }
+  .set-search:focus { outline: none; border-color: var(--accent); }
+  .set-select { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); padding: 7px 8px; font: inherit; font-size: 12.5px; max-width: 46%; }
+  .set-select:focus { outline: none; border-color: var(--accent); }
+  .set-json { width: 100%; background: #0b0f14; color: #e6edf3; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; resize: vertical; }
+  .set-json:focus { outline: none; border-color: var(--accent); }
+  .set-actions { display: flex; gap: 8px; align-items: center; margin: 8px 0 4px; }
+  .set-card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); padding: 10px 12px; margin: 4px 0 8px; }
+  .set-card .k { font-family: var(--mono); font-size: 13px; }
+  .set-card .meta { color: var(--muted); font-size: 12px; font-family: var(--mono); margin-top: 3px; }
+  .set-badge { display: inline-block; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; font-size: 10.5px; color: var(--muted); margin-left: 6px; vertical-align: middle; }
+  .set-empty { color: var(--muted); font-size: 13px; text-align: center; padding: 22px 8px; }
+  .model-group-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 8px 4px 3px; }
+  .model-opt { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 7px 9px; color: var(--fg); font: inherit; font-size: 12.5px; cursor: pointer; }
+  .model-opt:hover { background: var(--panel-2); border-color: var(--border); }
+  .model-opt.active { background: #1f3a5f; border-color: #2c4f7c; }
+  .model-opt .m-name { flex: 1; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .model-opt .m-act { color: var(--accent); font-size: 11px; flex: none; }
+  [data-theme="light"] .model-opt.active { background: #ddf4ff; border-color: #b6e3ff; }
+  .skill-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .skill-item:last-child { border-bottom: none; }
+  .skill-item .skill-col { flex: 1; min-width: 0; }
+  .skill-item .skill-name { font-weight: 600; }
+  .skill-item .skill-desc { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+  .skill-item .skill-path { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 560px) {
+    #settings { padding: 0; }
+    .settings-panel { width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; border: none; }
+    .settings-tab { padding: 8px 10px; }
+    .set-row { gap: 8px; flex-wrap: wrap; }
+    .set-select { max-width: 100%; flex: 1 1 40%; }
+  }
 
   #backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 50; }
   #backdrop.show { display: flex; }
@@ -348,6 +447,7 @@
   <span id="status">connecting</span>
   <button class="icon-btn" id="installBtn" title="安装到主屏幕" style="display:none">⤓</button>
   <button class="icon-btn" id="hdrNew" title="开启新会话" aria-label="开启新会话">＋</button>
+  <button class="icon-btn" id="settingsBtn" title="设置" aria-label="设置">⚙</button>
 </header>
 
 <div id="layout">
@@ -373,8 +473,7 @@
       <div class="image-previews" id="imagePreviews"></div>
       <div class="composer">
         <textarea id="input" placeholder="Ask pi…  (Enter to send, Shift+Enter for newline)"></textarea>
-        <button class="ghost" id="stop" title="Abort current run">Stop</button>
-        <button id="send">Send</button>
+        <button id="send" title="Send message">Send</button>
       </div>
       <div class="hint" id="hint">SSE connected · messages are streamed live from the pi RPC session</div>
     </footer>
@@ -402,6 +501,20 @@
 </div>
 
 <div id="backdrop"><div class="modal" id="modal"></div></div>
+<div id="settings">
+  <div class="settings-panel" role="dialog" aria-modal="true" aria-label="设置">
+    <div class="settings-head">
+      <span class="settings-title">设置</span>
+      <button class="icon-btn" id="settingsClose" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="settings-tabs">
+      <button class="settings-tab active" data-tab="general">General</button>
+      <button class="settings-tab" data-tab="models">Models</button>
+      <button class="settings-tab" data-tab="skills">Skills</button>
+    </div>
+    <div class="settings-body" id="settingsBody"></div>
+  </div>
+</div>
 <div id="lightbox"><img id="lightbox-img" src="" alt="" /></div>
 
 <script src="/vendor/marked.min.js"></script>
@@ -413,7 +526,6 @@
   const main = document.getElementById('main');
   const input = document.getElementById('input');
   const sendBtn = document.getElementById('send');
-  const stopBtn = document.getElementById('stop');
   const dot = document.getElementById('dot');
   const statusEl = document.getElementById('status');
   const hintEl = document.getElementById('hint');
@@ -457,6 +569,390 @@
   const textBlocks = new Map();       // contentIndex -> {el, raw}
   const thinkBlocks = new Map();
   const toolEls = new Map();          // toolCallId -> element
+
+  /* ---------------- preferences (persisted locally) ---------------- */
+
+  const PREFS_KEY = 'pi-webui:prefs';
+  const DEFAULT_PREFS = { theme: 'dark', fontSize: 'md', enterSend: true, autoFollow: true, showTrace: true };
+  let prefs = { ...DEFAULT_PREFS };
+  try { prefs = { ...DEFAULT_PREFS, ...(JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {}) }; } catch { /* ignore */ }
+
+  function savePrefs() {
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ }
+  }
+
+  /** Apply every interface preference (theme, font size, trace visibility, …). */
+  function applyPrefs() {
+    document.documentElement.dataset.theme = prefs.theme;
+    document.body.classList.toggle('font-sm', prefs.fontSize === 'sm');
+    document.body.classList.toggle('font-lg', prefs.fontSize === 'lg');
+    document.body.classList.toggle('hide-trace', !prefs.showTrace);
+    input.placeholder = prefs.enterSend
+      ? 'Ask pi…  (Enter to send, Shift+Enter for newline)'
+      : 'Ask pi…  (Ctrl/⌘+Enter to send, Enter for newline)';
+  }
+
+  /* ---------------- settings dialog (General / Models / Skills) ---------------- */
+
+  const settingsEl = document.getElementById('settings');
+  const settingsBody = document.getElementById('settingsBody');
+  const settingsTabsEl = document.querySelector('.settings-tabs');
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsClose = document.getElementById('settingsClose');
+  let settingsTab = 'general';
+
+  function openSettings(tab) {
+    if (tab) settingsTab = tab;
+    settingsEl.classList.add('show');
+    renderSettings();
+  }
+  function closeSettings() { settingsEl.classList.remove('show'); }
+
+  function renderSettings() {
+    settingsTabsEl.querySelectorAll('.settings-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === settingsTab));
+    settingsBody.innerHTML = '';
+    if (settingsTab === 'models') renderModelsTab();
+    else if (settingsTab === 'skills') renderSkillsTab();
+    else renderGeneralTab();
+  }
+
+  /* ---- small control builders ---- */
+
+  function setRow(name, desc, control) {
+    const row = el('div', 'set-row');
+    const col = el('div', 'set-col');
+    col.appendChild(el('div', 'set-name', esc(name)));
+    if (desc) col.appendChild(el('div', 'set-desc', esc(desc)));
+    row.appendChild(col);
+    if (control) row.appendChild(control);
+    return row;
+  }
+  function sectionTitle(text) { return el('div', 'set-sec', esc(text)); }
+
+  function seg(options, value, onChange) {
+    const box = el('div', 'seg');
+    options.forEach((o) => {
+      const b = el('button', o.value === value ? 'active' : null, esc(o.label));
+      b.type = 'button';
+      b.addEventListener('click', () => onChange(o.value));
+      box.appendChild(b);
+    });
+    return box;
+  }
+
+  function toggleSwitch(on, onChange) {
+    const s = el('button', 'switch' + (on ? ' on' : ''));
+    s.type = 'button';
+    s.setAttribute('role', 'switch');
+    s.setAttribute('aria-checked', on ? 'true' : 'false');
+    s.addEventListener('click', () => onChange(!on));
+    return s;
+  }
+
+  function actionBtn(label, onClick, primary) {
+    const b = el('button', 'set-btn' + (primary ? ' primary' : ''), esc(label));
+    b.type = 'button';
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  /* ---- General ---- */
+
+  function renderGeneralTab() {
+    const frag = document.createDocumentFragment();
+
+    frag.appendChild(sectionTitle('外观'));
+    frag.appendChild(setRow('主题', '深色 / 浅色', seg(
+      [{ value: 'dark', label: '深色' }, { value: 'light', label: '浅色' }], prefs.theme,
+      (v) => { prefs.theme = v; savePrefs(); applyPrefs(); renderSettings(); },
+    )));
+    frag.appendChild(setRow('字号', '聊天文字大小', seg(
+      [{ value: 'sm', label: '小' }, { value: 'md', label: '中' }, { value: 'lg', label: '大' }], prefs.fontSize,
+      (v) => { prefs.fontSize = v; savePrefs(); applyPrefs(); renderSettings(); },
+    )));
+    frag.appendChild(setRow('显示思考与工具调用', '关闭后隐藏每条回复里的折叠块', toggleSwitch(prefs.showTrace,
+      (v) => { prefs.showTrace = v; savePrefs(); applyPrefs(); renderSettings(); })));
+
+    frag.appendChild(sectionTitle('交互'));
+    frag.appendChild(setRow('回车发送', '关闭后按 Enter 换行，用 Ctrl/⌘+Enter 发送', toggleSwitch(prefs.enterSend,
+      (v) => { prefs.enterSend = v; savePrefs(); applyPrefs(); renderSettings(); })));
+    frag.appendChild(setRow('自动跟随新输出', '关闭后新内容不再把视图拉到底部', toggleSwitch(prefs.autoFollow,
+      (v) => { prefs.autoFollow = v; savePrefs(); applyPrefs(); renderSettings(); })));
+
+    frag.appendChild(sectionTitle('应用'));
+    frag.appendChild(setRow('安装到主屏幕', '把 pi webui 作为 PWA 安装', actionBtn('安装', () => {
+      closeSettings();
+      const ib = document.getElementById('installBtn');
+      if (ib) ib.click();
+    })));
+    frag.appendChild(setRow('恢复默认设置', '只重置本浏览器中的界面偏好', actionBtn('重置', () => {
+      prefs = { ...DEFAULT_PREFS };
+      savePrefs(); applyPrefs(); renderSettings();
+    })));
+
+    settingsBody.appendChild(frag);
+  }
+
+  /* ---- Models ---- */
+
+  function renderModelsTab() {
+    settingsBody.innerHTML = '<div class="set-empty">加载中…</div>';
+    Promise.all([
+      fetch('/api/models').then((r) => r.ok ? r.json() : Promise.reject(new Error('models'))),
+      fetch('/api/model-config').then((r) => r.ok ? r.json() : null).catch(() => null),
+    ])
+      .then(([data, config]) => { cachedModels = data; paintModelsTab(data, config); })
+      .catch(() => {
+        settingsBody.innerHTML = '';
+        settingsBody.appendChild(el('div', 'set-empty', '加载模型失败'));
+      });
+  }
+
+  function paintModelsTab(data, config) {
+    const { model, models = [], thinkingLevel, thinkingLevels } = data;
+    const cfg = (config && config.settings) || {};
+    const levelList = (thinkingLevels && thinkingLevels.length) ? thinkingLevels : ['off', 'minimal', 'low', 'medium', 'high'];
+    settingsBody.innerHTML = '';
+
+    // Inline status line used by the config actions below.
+    let statusEl2 = null;
+    const setStatus2 = (msg, ok) => {
+      if (!statusEl2) return;
+      statusEl2.textContent = msg || '';
+      statusEl2.style.color = ok === false ? 'var(--err)' : 'var(--muted)';
+    };
+
+    /* current model */
+    settingsBody.appendChild(sectionTitle('当前模型'));
+    const card = el('div', 'set-card');
+    card.appendChild(el('div', 'k', esc(model ? (model.id || '?') : '未选择')));
+    if (model) {
+      const badges = [esc(model.provider || '')];
+      if (getModelInputs(model).includes('image')) badges.push('图+文');
+      card.appendChild(el('div', 'meta', badges.filter(Boolean).join(' · ')));
+    }
+    settingsBody.appendChild(card);
+
+    const trow = el('div', 'set-row');
+    const tcol = el('div', 'set-col');
+    tcol.appendChild(el('div', 'set-name', thinkingLevel ? '当前：' + esc(thinkingLevel) : '选择推理强度'));
+    tcol.appendChild(el('div', 'set-desc', '越高级别花费更多思考 token，仅对支持的模型生效'));
+    trow.appendChild(tcol);
+    trow.appendChild(seg(levelList.map((l) => ({ value: l, label: l })), thinkingLevel, setThinking));
+    settingsBody.appendChild(sectionTitle('思考级别 (Thinking)'));
+    settingsBody.appendChild(trow);
+
+    /* default model for new sessions (settings.json) */
+    settingsBody.appendChild(sectionTitle('默认模型（settings.json）'));
+    const modelSel = el('select', 'set-select');
+    modelSel.appendChild(new Option('（未设置）', ''));
+    const byProvider = {};
+    for (const m of models) (byProvider[m.provider || 'other'] = byProvider[m.provider || 'other'] || []).push(m);
+    for (const p of Object.keys(byProvider)) {
+      const og = document.createElement('optgroup');
+      og.label = p;
+      for (const m of byProvider[p]) {
+        const o = document.createElement('option');
+        o.value = p + '\u0000' + m.id;
+        o.textContent = m.id || m.name || '?';
+        if (cfg.defaultProvider === p && cfg.defaultModel === m.id) o.selected = true;
+        og.appendChild(o);
+      }
+      modelSel.appendChild(og);
+    }
+    if (cfg.defaultProvider && cfg.defaultModel) modelSel.value = cfg.defaultProvider + '\u0000' + cfg.defaultModel;
+
+    const thinkSel = el('select', 'set-select');
+    thinkSel.appendChild(new Option('（未设置）', ''));
+    for (const l of levelList) {
+      const o = new Option(l, l);
+      if (cfg.defaultThinkingLevel === l) o.selected = true;
+      thinkSel.appendChild(o);
+    }
+
+    const defRow = el('div', 'set-row');
+    const defCol = el('div', 'set-col');
+    defCol.appendChild(el('div', 'set-name', '新会话默认'));
+    defCol.appendChild(el('div', 'set-desc', '应用默认 provider / 模型 / 思考级别，重启 pi 后新会话生效'));
+    defRow.appendChild(defCol);
+    defRow.appendChild(modelSel);
+    defRow.appendChild(thinkSel);
+    settingsBody.appendChild(defRow);
+    const defActions = el('div', 'set-actions');
+    statusEl2 = el('div', 'set-desc');
+    statusEl2.style.flex = '1';
+    defActions.appendChild(statusEl2);
+    defActions.appendChild(actionBtn('保存默认', async () => {
+      const [provider, modelId] = String(modelSel.value || '').split('\u0000');
+      const settings = {
+        defaultProvider: provider || null,
+        defaultModel: modelId || null,
+        defaultThinkingLevel: thinkSel.value || null,
+      };
+      try {
+        const r = await fetch('/api/model-config', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ settings }),
+        });
+        if (!r.ok) throw new Error((await r.json()).error || 'failed');
+        setStatus2('已保存，重启 pi 后生效', true);
+      } catch (err) { setStatus2('保存失败: ' + err.message, false); }
+    }, true));
+    settingsBody.appendChild(defActions);
+
+    /* custom models.json */
+    settingsBody.appendChild(sectionTitle('自定义模型 (models.json)'));
+    settingsBody.appendChild(el('div', 'set-desc',
+      '文件：' + esc((config && config.paths && config.paths.models) || '~/.pi/agent/models.json') +
+      ' · 支持 providers / models / modelOverrides（见 pi docs/models.md）'));
+    const ta = el('textarea', 'set-json');
+    ta.spellcheck = false;
+    ta.rows = 14;
+    ta.value = (config && config.modelsText) || '{\n  "providers": {}\n}';
+    settingsBody.appendChild(ta);
+    const jsonActions = el('div', 'set-actions');
+    const jsonStatus = el('div', 'set-desc');
+    jsonStatus.style.flex = '1';
+    jsonActions.appendChild(jsonStatus);
+    const setJsonStatus = (msg, ok) => { jsonStatus.textContent = msg || ''; jsonStatus.style.color = ok === false ? 'var(--err)' : 'var(--muted)'; };
+    jsonActions.appendChild(actionBtn('格式化', () => {
+      try { ta.value = JSON.stringify(JSON.parse(ta.value), null, 2) + '\n'; setJsonStatus('已格式化'); }
+      catch (err) { setJsonStatus('JSON 错误: ' + err.message, false); }
+    }));
+    jsonActions.appendChild(actionBtn('保存 models.json', async () => {
+      try {
+        const r = await fetch('/api/model-config', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modelsText: ta.value }),
+        });
+        if (!r.ok) throw new Error((await r.json()).error || 'failed');
+        setJsonStatus('已保存，重启 pi 后生效', true);
+      } catch (err) { setJsonStatus('保存失败: ' + err.message, false); }
+    }, true));
+    settingsBody.appendChild(jsonActions);
+
+    settingsBody.appendChild(setRow('重启 pi 进程',
+      '重新加载 models.json / settings.json / 技能；会保留当前会话，期间短暂中断',
+      actionBtn('重启', restartPiFromUi, true)));
+
+    /* available models */
+    settingsBody.appendChild(sectionTitle('可用模型'));
+    const search = el('input', 'set-search');
+    search.placeholder = '搜索模型…';
+    settingsBody.appendChild(search);
+    const list = el('div');
+    settingsBody.appendChild(list);
+
+    function paintList() {
+      list.innerHTML = '';
+      const q = search.value.trim().toLowerCase();
+      const groups = {};
+      for (const m of models) {
+        const p = m.provider || 'other';
+        if (q && !((m.id || '') + ' ' + p).toLowerCase().includes(q)) continue;
+        (groups[p] = groups[p] || []).push(m);
+      }
+      const keys = Object.keys(groups);
+      if (!keys.length) { list.appendChild(el('div', 'set-empty', '没有匹配的模型')); return; }
+      for (const p of keys) {
+        list.appendChild(el('div', 'model-group-label', esc(p)));
+        for (const m of groups[p]) {
+          const active = !!model && m.provider === model.provider && m.id === model.id;
+          const b = el('button', 'model-opt' + (active ? ' active' : ''));
+          b.type = 'button';
+          b.appendChild(el('span', 'm-name', esc(m.id || m.label || m.name || '?') + (getModelInputs(m).includes('image') ? ' 🖼' : '')));
+          b.appendChild(el('span', 'm-act', active ? '✓' : ''));
+          b.addEventListener('click', () => switchModel(m.provider, m.id));
+          list.appendChild(b);
+        }
+      }
+    }
+    search.addEventListener('input', paintList);
+    paintList();
+  }
+
+  async function restartPiFromUi() {
+    if (!confirm('重启 pi 进程？\n\n会重新加载 models.json / settings.json / 技能，当前会话会保留。')) return;
+    try {
+      const r = await fetch('/api/restart-pi', { method: 'POST' });
+      if (!r.ok) throw new Error('failed');
+      addSystem('正在重启 pi…');
+    } catch (err) {
+      addSystem('重启失败: ' + err.message);
+    }
+  }
+
+  async function switchModel(provider, modelId) {
+    try {
+      const r = await fetch('/api/set-model', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, modelId }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error || 'request failed');
+      addSystem('切换到 ' + modelId + ' · ' + provider);
+      renderModelsTab();
+    } catch (err) {
+      addSystem('模型切换失败: ' + err.message);
+    }
+  }
+
+  async function setThinking(level) {
+    try {
+      const r = await fetch('/api/set-thinking', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error || 'request failed');
+      addSystem('思考级别：' + level);
+      renderModelsTab();
+    } catch (err) {
+      addSystem('设置思考级别失败: ' + err.message);
+    }
+  }
+
+  /* ---- Skills ---- */
+
+  function renderSkillsTab() {
+    settingsBody.innerHTML = '<div class="set-empty">加载中…</div>';
+    fetch('/api/skills')
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error('failed')))
+      .then((data) => paintSkillsTab(data.skills || []))
+      .catch(() => {
+        settingsBody.innerHTML = '';
+        settingsBody.appendChild(el('div', 'set-empty', '加载技能失败'));
+      });
+  }
+
+  function paintSkillsTab(skills) {
+    settingsBody.innerHTML = '';
+    settingsBody.appendChild(setRow(
+      '技能 (' + skills.length + ')',
+      '来自 ~/.pi/agent/skills、.pi/skills、.agents/skills 及 packages',
+      actionBtn('刷新', renderSkillsTab),
+    ));
+
+    if (!skills.length) {
+      settingsBody.appendChild(el('div', 'set-empty', '没有发现技能。把技能文件夹放到 ~/.pi/agent/skills/ 即可被识别。'));
+      return;
+    }
+    for (const s of skills) {
+      const item = el('div', 'skill-item');
+      const col = el('div', 'skill-col');
+      const nameRow = el('div', 'skill-name', esc(s.name));
+      if (s.location) nameRow.appendChild(el('span', 'set-badge', esc(s.location)));
+      col.appendChild(nameRow);
+      if (s.description) col.appendChild(el('div', 'skill-desc', esc(s.description)));
+      if (s.path) col.appendChild(el('div', 'skill-path', esc(s.path)));
+      item.appendChild(col);
+      item.appendChild(actionBtn('运行', () => {
+        closeSettings();
+        input.value = '/' + (s.command || ('skill:' + s.name)) + ' ';
+        try { input.focus(); } catch { /* ignore */ }
+        input.dispatchEvent(new Event('input'));
+      }, true));
+      settingsBody.appendChild(item);
+    }
+  }
 
   /* ---- image upload ---- */
   const imageInput = document.getElementById('imageInput');
@@ -637,7 +1133,7 @@
   // Keep the newest output in view while the user is following along at the bottom.
   // While the user has scrolled up to read, new output must never yank the page down.
   function scroll() {
-    if (!stickToBottom) return;
+    if (!stickToBottom || !prefs.autoFollow) return;
     if (atBottom(2)) return;   // already pinned to the bottom
     autoScrolling = true;
     main.scrollTop = main.scrollHeight;
@@ -1137,13 +1633,25 @@
         dot.className = 'dot';
         statusEl.textContent = 'exited';
         break;
+      case 'pi_restarting':
+        dot.className = 'dot busy';
+        statusEl.textContent = 'restarting…';
+        hintEl.textContent = '正在重启 pi 进程…';
+        break;
+      case 'pi_ready':
+        addSystem('pi 已重启');
+        hintEl.textContent = 'live · streamed from the pi RPC session';
+        if (settingsEl.classList.contains('show') && settingsTab === 'models') renderModelsTab();
+        break;
     }
   }
 
   function setStatus() {
     dot.className = 'dot ' + (streaming ? 'busy' : 'on');
     statusEl.textContent = streaming ? 'working…' : 'idle';
-    stopBtn.disabled = !streaming;
+    sendBtn.textContent = streaming ? 'Stop' : 'Send';
+    sendBtn.title = streaming ? 'Abort current run' : 'Send message';
+    sendBtn.classList.toggle('stop', streaming);
   }
 
   /* ---------------- extension UI dialogs ---------------- */
@@ -1451,10 +1959,15 @@
     await fetch('/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   }
 
-  sendBtn.addEventListener('click', send);
-  stopBtn.addEventListener('click', () => fetch('/abort', { method: 'POST' }));
+  sendBtn.addEventListener('click', () => {
+    if (streaming) fetch('/abort', { method: 'POST' });
+    else send();
+  });
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    if (!prefs.enterSend && !(e.metaKey || e.ctrlKey)) return;
+    e.preventDefault();
+    send();
   });
   input.addEventListener('input', () => {
     input.style.height = 'auto';
@@ -1469,6 +1982,16 @@
   sbRefresh.addEventListener('click', () => loadSessions());
   sbNew.addEventListener('click', () => newSession());
   hdrNew.addEventListener('click', () => newSession());
+  settingsBtn.addEventListener('click', () => openSettings());
+  settingsClose.addEventListener('click', closeSettings);
+  settingsEl.addEventListener('click', (e) => { if (e.target === settingsEl) closeSettings(); });
+  settingsTabsEl.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('.settings-tab');
+    if (b) { settingsTab = b.dataset.tab; renderSettings(); }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && settingsEl.classList.contains('show')) { e.stopPropagation(); closeSettings(); }
+  }, { capture: true });
   navListBtn.addEventListener('click', () => {
     const open = navPanel.classList.toggle('hidden') === false;
     navListBtn.classList.toggle('on', open);
@@ -1710,6 +2233,7 @@
   // Toolbar button triggers file picker
   document.getElementById('tbImageBtn').addEventListener('click', () => imageInput.click());
 
+  applyPrefs();
   setStatus();
   positionNav();
   refreshNav();

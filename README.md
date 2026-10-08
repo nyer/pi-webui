@@ -85,8 +85,6 @@ Any extra args are forwarded to `pi`.
 
 ## UI
 
-## UI
-
 - **Left sidebar — 历史会话**: lists pi sessions under `~/.pi/agent/sessions/**`
   (title from the session name or first user prompt, project, message count,
   relative time). **Fork chains are collapsed** — repeated `--fork` restarts create
@@ -103,6 +101,22 @@ Any extra args are forwarded to `pi`.
     open it and swipe left to close it** (vertical scrolling and horizontal code
     blocks are left untouched). The header `＋` button starts a new session, same
     as the sidebar's.
+- **Settings (`⚙` in the header)**: a tabbed dialog with **General**, **Models** and
+  **Skills**.
+  - *General* — local interface preferences (dark/light **theme**, font size,
+    show/hide the thinking & tool-call blocks, Enter-to-send, auto-follow new
+    output, PWA install, reset); stored in `localStorage`, no server round-trip.
+  - *Models* — the active model, a **thinking-level** selector, a searchable
+    list of every configured model grouped by provider (click to switch, `🖼`
+    marks image-capable models), plus **configuration**: choose the default
+    provider/model/thinking level (written to `~/.pi/agent/settings.json`) and
+    edit `~/.pi/agent/models.json` (custom providers/models, `modelOverrides`)
+    in a JSON editor. Because pi only reads these files at startup, a
+    **重启** button restarts the pi process in place, resuming the current
+    session, to apply them (it also re-scans skills).
+  - *Skills* — every skill pi discovered (`~/.pi/agent/skills`, `.pi/skills`,
+    `.agents/skills`, packages): name, description, location and path, with a
+    **运行** button that drops `/skill:<name>` into the composer.
 - **Markdown** rendering (`marked` + `highlight.js`, matching pi's `--export`
   pipeline): headings, lists, tables, task lists, strikethrough, code highlighting;
   raw HTML is escaped and link schemes are allow-listed.
@@ -140,6 +154,13 @@ Any extra args are forwarded to `pi`.
 | POST | `/switch-session` | `{ "path": "<session.jsonl>" }` — switch session; broadcasts a fresh snapshot to all clients |
 | POST | `/new-session` | start a fresh session; broadcasts a snapshot |
 | POST | `/delete-session` | `{ "path": "<session.jsonl>" }` — move to Trash (`trash` CLI, else unlink); refuses the active session (409) |
+| GET | `/api/models` | configured models + active model + thinking level/levels |
+| POST | `/api/set-model` | `{ "provider": "...", "modelId": "..." }` — switch model |
+| POST | `/api/set-thinking` | `{ "level": "off\|minimal\|low\|medium\|high\|xhigh\|max" }` — set thinking level |
+| GET | `/api/skills` | skill commands discovered by pi (from `get_commands`) |
+| GET | `/api/model-config` | `settings.json` model defaults + raw `models.json` text + paths |
+| POST | `/api/model-config` | `{ "settings": {...} }` and/or `{ "modelsText": "..." }` — write config; `restartRequired` |
+| POST | `/api/restart-pi` | restart the pi process, resuming the current session (reloads models / skills / settings) |
 
 ## Notes
 
